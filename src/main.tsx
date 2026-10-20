@@ -1,3 +1,4 @@
+import "./web/polyfills";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
@@ -14,7 +15,7 @@ import { queryClient } from "@/lib/query";
 import { settingsApi } from "@/lib/api";
 import { Toaster } from "@/components/ui/sonner";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
 import { FrontendErrorBoundary } from "./components/FrontendErrorBoundary";
@@ -28,6 +29,7 @@ import {
 } from "./lib/modelsDevAutoSync";
 import { initializeWindowActivity } from "@/lib/windowActivity";
 import { initializeInputModality } from "@/lib/inputModality";
+import { WebGate } from "./web/WebGate";
 
 installGlobalErrorHandlers();
 
@@ -80,16 +82,71 @@ async function handleConfigLoadError(
 }
 
 // 监听后端的配置加载错误事件：仅提醒用户并强制退出，不修改任何配置文件
-try {
-  void listen("configLoadError", async (evt) => {
-    await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
-  });
-} catch (e) {
-  // 忽略事件订阅异常（例如在非 Tauri 环境下）
-  reportFrontendError("config_load_error_listener", e);
+function subscribeConfigLoadError() {
+  try {
+    void listen("configLoadError", async (evt) => {
+      await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
+    });
+  } catch (e) {
+    // 忽略事件订阅异常（例如在非 Tauri 环境下）
+    reportFrontendError("config_load_error_listener", e);
+  }
+}
+
+/**
+ * Web 模式下未登录时不做任何后端请求：登录页由 WebGate 接管，
+ * 登录成功后整页刷新，再走完整的启动流程。
+ */
+async function backendReady(): Promise<boolean> {
+  if (isTauri()) return true;
+  try {
+    const response = await fetch("/api/auth/status", {
+      credentials: "same-origin",
+    });
+    if (!response.ok) return false;
+    const status = (await response.json()) as { authenticated?: boolean };
+    return Boolean(status.authenticated);
+  } catch {
+    return false;
+  }
+}
+
+function renderApp() {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <FrontendErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
+            <UpdateProvider>
+              {/* 系统开了「减少动态效果」时，framer-motion 的位移动画一律跳过 */}
+              <MotionConfig reducedMotion="user">
+                {/* 全局悬停提示：移上去立即出现（HoverTip） */}
+                <TooltipProvider delayDuration={0} skipDelayDuration={0}>
+                  <WebGate>
+                    <App />
+                  </WebGate>
+                </TooltipProvider>
+              </MotionConfig>
+              <Toaster />
+            </UpdateProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </FrontendErrorBoundary>
+    </React.StrictMode>,
+  );
 }
 
 async function bootstrap() {
+  const ready = await backendReady();
+  if (!ready) {
+    initializeWindowActivity();
+    initializeInputModality();
+    renderApp();
+    return;
+  }
+
+  subscribeConfigLoadError();
+
   // 启动早期主动查询后端初始化错误，避免事件竞态
   try {
     const initError = (await invoke(
@@ -129,26 +186,7 @@ async function bootstrap() {
     .then((settings) => syncLanguageFromSettings(settings.language))
     .catch((error) => reportFrontendError("startup_language_sync", error));
 
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <FrontendErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
-            <UpdateProvider>
-              {/* 系统开了「减少动态效果」时，framer-motion 的位移动画一律跳过 */}
-              <MotionConfig reducedMotion="user">
-                {/* 全局悬停提示：移上去立即出现（HoverTip） */}
-                <TooltipProvider delayDuration={0} skipDelayDuration={0}>
-                  <App />
-                </TooltipProvider>
-              </MotionConfig>
-              <Toaster />
-            </UpdateProvider>
-          </ThemeProvider>
-        </QueryClientProvider>
-      </FrontendErrorBoundary>
-    </React.StrictMode>,
-  );
+  renderApp();
 
   void syncModelsDevPricingOnStartup()
     .then((result) => {

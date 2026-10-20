@@ -45,6 +45,9 @@ mod tray_panel;
 mod usage_events;
 mod usage_script;
 
+#[cfg(feature = "web")]
+pub mod web;
+
 pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
 pub use codex_config::{
     extract_codex_experimental_bearer_token, get_codex_auth_path, get_codex_config_path,

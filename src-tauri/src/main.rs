@@ -2,6 +2,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Web 模式：以 HTTP 服务方式运行同一套业务逻辑，不初始化 Tauri 窗口。
+    #[cfg(feature = "web")]
+    {
+        let mut web_mode = false;
+        let mut reset_password = false;
+        for arg in std::env::args().skip(1) {
+            match arg.as_str() {
+                "--web" => web_mode = true,
+                "--web-reset-password" => reset_password = true,
+                _ => {}
+            }
+        }
+        if web_mode || reset_password {
+            cc_switch_lib::web::run(reset_password);
+            return;
+        }
+    }
+
     // 在 Linux 上设置 WebKit 环境变量以解决 DMA-BUF 渲染问题
     // 某些 Linux 系统（如 Debian 13.2、Nvidia GPU）上 WebKitGTK 的 DMA-BUF 渲染器可能导致白屏/黑屏
     // 参考: https://github.com/tauri-apps/tauri/issues/9394

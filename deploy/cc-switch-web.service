@@ -1,0 +1,20 @@
+# 参考示例。推荐直接运行 deploy/install.sh，它会根据实际路径/用户生成等价单元。
+[Unit]
+Description=CC Switch Web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ccswitch
+Group=ccswitch
+EnvironmentFile=/etc/cc-switch-web.env
+WorkingDirectory=/opt/cc-switch
+ExecStart=/opt/cc-switch/cc-switch --web --dist /opt/cc-switch/dist-web
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

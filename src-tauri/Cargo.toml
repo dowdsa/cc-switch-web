@@ -18,6 +18,8 @@ doctest = false
 [features]
 default = []
 test-hooks = []
+# Browser-served mode: `cc-switch --web`. Keeps the desktop build unchanged.
+web = ["dep:argon2", "dep:env_logger", "tower-http/fs", "axum/multipart"]
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }
@@ -84,6 +86,9 @@ hmac = "0.12"
 json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
+# Web mode only (cargo feature "web")
+argon2 = { version = "0.5", optional = true }
+env_logger = { version = "0.11", optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

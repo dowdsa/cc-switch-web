@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isTauri } from "@tauri-apps/api/core";
 import { Maximize2, Minimize2, Minus, X } from "lucide-react";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ const BUTTON =
 
 /** 接在页头最右端的最小化 / 最大化 / 关闭：Windows 一律用它，Linux 打开「使用应用内窗口按钮」后用它。 */
 export function WindowControls() {
+  if (!isTauri()) return null;
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
 
