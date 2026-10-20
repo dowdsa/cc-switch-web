@@ -107,7 +107,7 @@ if [ "$VERIFY" -eq 1 ]; then
   fi
 
   info "安装依赖"
-  $PNPM install --frozen-lockfile || fail "依赖安装失败（上游可能改了 lockfile，请手动 pnpm install 后重试）。"
+  $PNPM install --frozen-lockfile --prod=false || fail "依赖安装失败（上游可能改了 lockfile，请手动 pnpm install 后重试）。"
 
   info "前端类型检查"
   $PNPM exec tsc --noEmit || fail "TypeScript 类型检查失败。"

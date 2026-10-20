@@ -9,6 +9,7 @@
 #
 # 选项:
 #   --skip-build   跳过前端/Rust 构建，直接安装现有产物并重启
+#   --no-start     只构建并安装，不写 systemd 单元（无 systemd 环境手动启动）
 #
 # 环境变量:
 #   HOST / PORT               仅监听回环时 HOST 可用默认 127.0.0.1；对外监听必须显式
@@ -28,10 +29,12 @@ PORT="${PORT:-8787}"
 ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-}"
 COOKIE_SECURE="${COOKIE_SECURE:-auto}"
 SKIP_BUILD=0
+NO_START=0
 
 for arg in "$@"; do
   case "$arg" in
     --skip-build) SKIP_BUILD=1 ;;
+    --no-start) NO_START=1 ;;
     -h|--help)
       sed -n '2,20p' "$0"
       exit 0
@@ -48,10 +51,10 @@ fail() { printf '\033[1;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || fail "请使用 root 或 sudo 运行"
 
-if ! command -v systemctl >/dev/null 2>&1; then
-  fail "未检测到 systemd。无 systemd 环境可手动运行：
-  $INSTALL_DIR/cc-switch --web --dist $INSTALL_DIR/dist-web
-（先执行构建并复制产物，或使用 Docker 部署）"
+if [ "$NO_START" -eq 0 ]; then
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    fail "systemd 不可用。可改用 --no-start 只构建安装，再手动启动（见输出）。"
+  fi
 fi
 
 SERVICE_USER="${CCSWITCH_WEB_USER:-${SUDO_USER:-root}}"
@@ -87,8 +90,8 @@ Debian/Ubuntu 可执行:
     fail "未找到 pnpm/corepack。请安装 Node.js 20+ 并执行 corepack enable。"
   fi
 
-  info "安装前端依赖"
-  ( cd "$REPO_DIR" && $PNPM install --frozen-lockfile )
+  info "安装前端依赖（含构建工具）"
+  ( cd "$REPO_DIR" && $PNPM install --frozen-lockfile --prod=false )
 
   info "构建 Web 前端"
   ( cd "$REPO_DIR" && $PNPM build:web )
@@ -120,6 +123,24 @@ CC_SWITCH_WEB_COOKIE_SECURE=$COOKIE_SECURE
 EOF
 chmod 0640 "$ENV_FILE"
 chown root:"$SERVICE_GROUP" "$ENV_FILE"
+
+if [ "$NO_START" -eq 1 ]; then
+  echo
+  info "--no-start：已安装到 $INSTALL_DIR，未配置 systemd。"
+  echo "  手动启动命令（可用 systemd/supervisor/nohup 托管）："
+  echo "  sudo -u $SERVICE_USER env HOME=$SERVICE_HOME \\"
+  echo "    CC_SWITCH_WEB_HOST=$HOST CC_SWITCH_WEB_PORT=$PORT \\"
+  echo "    CC_SWITCH_WEB_ALLOWED_ORIGINS='$ALLOWED_ORIGINS' \\"
+  echo "    CC_SWITCH_WEB_COOKIE_SECURE=$COOKIE_SECURE \\"
+  echo "    $INSTALL_DIR/cc-switch --web --dist $INSTALL_DIR/dist-web"
+  echo
+  if [ "$HOST" = "127.0.0.1" ]; then
+    echo "  访问地址: http://127.0.0.1:$PORT"
+  else
+    echo "  访问地址: http://<服务器IP>:$PORT"
+  fi
+  exit 0
+fi
 
 info "写入 systemd 服务 $UNIT_FILE"
 cat > "$UNIT_FILE" <<EOF

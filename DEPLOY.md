@@ -30,6 +30,9 @@ sudo bash deploy/install.sh
 
 默认只监听 `127.0.0.1:8787`，适合本机 + SSH 隧道/Nginx 反代。
 
+- 生产环境需要 systemd；容器等无 systemd 环境用 `--no-start`：脚本只构建并安装，随后打印手动启动命令。
+- 已有 release 产物、只想更新安装时加 `--skip-build`。
+
 ### 内网直接访问
 
 ```bash
