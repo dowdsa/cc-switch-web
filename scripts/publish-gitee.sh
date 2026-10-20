@@ -20,10 +20,10 @@ fail() { printf '\033[1;31m[publish]\033[0m %s\n' "$*" >&2; exit 1; }
 
 REMOTE="${REMOTE:-origin}"
 BASE_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo unknown)"
-TMP_BRANCH="publish-gitee-tmp"
 MESSAGE="CC Switch Web snapshot (based on upstream ${BASE_TAG})"
+TREE="$(git rev-parse "web^{tree}")"
 
-info "将把 web@$(git rev-parse --short HEAD) 压缩为一个新提交并强制推送到 $REMOTE/web"
+info "将把 web@$(git rev-parse --short HEAD) 压缩为一个无父提交并强制推送到 $REMOTE/web"
 info "提交说明: $MESSAGE"
 info "注意：这会重写 Gitee 上的提交历史。"
 
@@ -35,21 +35,11 @@ if [ "$YES" -ne 1 ]; then
   esac
 fi
 
-restore_branch() {
-  if [ "$(git branch --show-current)" = "$TMP_BRANCH" ]; then
-    git switch web >/dev/null 2>&1 || true
-  fi
-}
-trap restore_branch EXIT
+# 直接用当前树创建无父提交，不切换分支、不触碰工作区/索引。
+COMMIT="$(git commit-tree "$TREE" -m "$MESSAGE")"
+git branch -f publish "$COMMIT" >/dev/null
+git push --force "$REMOTE" "$COMMIT:refs/heads/web"
 
-git branch -D "$TMP_BRANCH" >/dev/null 2>&1 || true
-git switch --orphan "$TMP_BRANCH" >/dev/null
-git add -A
-git commit -m "$MESSAGE" >/dev/null
-git push --force "$REMOTE" "$TMP_BRANCH:web"
-
-git switch web >/dev/null
-git branch -D "$TMP_BRANCH" >/dev/null
-trap - EXIT
-
-info "发布完成：$REMOTE/web 现在只包含一个提交 $MESSAGE"
+info "发布完成：$REMOTE/web 现在只包含一个提交"
+info "  $COMMIT $MESSAGE"
+info "本地完整历史仍在 web 分支；快照提交记录在本地 publish 分支。"
