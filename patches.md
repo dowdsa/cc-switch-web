@@ -13,6 +13,7 @@
 | `README.md` | 根 README 替换为 Web 二开说明（保留 LICENSE 与上游版权声明） |
 | `README_DE.md` / `README_JA.md` / `README_ZH.md` | 删除上游多语言 README（含赞助商内容，Gitee 中文界面会优先展示 README_ZH） |
 | `src/main.tsx` | 引入 `WebGate`；Web 未登录时跳过后端启动请求；启动渲染抽成 `renderApp()` |
+| `src/components/shell/Sidebar.tsx` | 侧栏底部挂载 Web 账号入口（`WebSidebarAccount`） |
 | `src/components/shell/WindowControls.tsx` | 非 Tauri 环境返回 `null` |
 | `package.json` | 新增 `dev:web` / `build:web` 脚本 |
 | `.gitignore` | 忽略 `dist-web/` |

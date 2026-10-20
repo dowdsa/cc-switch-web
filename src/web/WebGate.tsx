@@ -5,8 +5,7 @@ import {
   type ReactNode,
 } from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import { getAuthStatus, postJson, type WebAuthStatus } from "./api";
-import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { getAuthStatus, type WebAuthStatus } from "./api";
 import { LoginPage } from "./LoginPage";
 import { SetupPage } from "./SetupPage";
 
@@ -72,78 +71,5 @@ function BrowserGate({ children }: { children: ReactNode }) {
     );
   }
 
-  return (
-    <>
-      {children}
-      <AccountMenu
-        username={status.username ?? ""}
-        onSignedOut={() => window.location.reload()}
-      />
-    </>
-  );
-}
-
-function AccountMenu({
-  username,
-  onSignedOut,
-}: {
-  username: string;
-  onSignedOut: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  async function handleLogout() {
-    setBusy(true);
-    try {
-      await postJson("/api/auth/logout", {});
-    } catch {
-      /* 即使请求失败也回到登录页 */
-    } finally {
-      onSignedOut();
-    }
-  }
-
-  return (
-    <div className="fixed bottom-3 right-3 z-[9999] flex flex-col items-end gap-2">
-      {open ? (
-        <div className="w-56 rounded-lg border bg-card p-2 text-sm text-card-foreground shadow-lg">
-          <div className="truncate px-2 py-1 text-xs text-muted-foreground">
-            {username}
-          </div>
-          <button
-            type="button"
-            className="w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
-            onClick={() => {
-              setPasswordOpen(true);
-              setOpen(false);
-            }}
-          >
-            修改密码
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="w-full rounded-md px-2 py-1.5 text-left text-destructive hover:bg-accent disabled:opacity-60"
-            onClick={() => void handleLogout()}
-          >
-            退出登录
-          </button>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="rounded-full border bg-card px-3 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-accent"
-        title="Web 版账号"
-      >
-        {open ? "关闭" : `账户 · ${username}`}
-      </button>
-      <ChangePasswordDialog
-        open={passwordOpen}
-        onClose={() => setPasswordOpen(false)}
-      />
-    </div>
-  );
+  return <>{children}</>;
 }

@@ -31,6 +31,7 @@ import { useUpdate } from "@/contexts/UpdateContext";
 import { sidebarWidth, useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
 import { useSettingsQuery } from "@/lib/query";
+import { WebSidebarAccount } from "@/web/AccountMenu";
 import {
   fmtInt,
   formatHitRatePercent,
@@ -100,6 +101,7 @@ export function Sidebar(props: SidebarProps) {
       ) : (
         <MainDirectory {...props} collapsed={collapsed} />
       )}
+      <WebSidebarAccount collapsed={collapsed} />
     </nav>
   );
 }

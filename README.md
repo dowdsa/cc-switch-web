@@ -55,7 +55,7 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 
 - 授权中心：GitHub Copilot / ChatGPT / xAI OAuth 设备码登录与多账号管理
 - WebDAV / S3 同步、数据库备份、SQL 导入导出
-- 单管理员账号：Argon2id 哈希、服务端会话、改密后旧会话全部失效
+- 单管理员账号：Argon2id 哈希、服务端会话、改密后旧会话全部失效；账号入口固定在左侧栏底部
 - 只监听回环的默认部署、一次性初始化令牌、登录限流、CSRF 校验
 
 ## 🧩 支持的 CLI 工具
@@ -83,9 +83,9 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 | --- | --- |
 | ![授权中心](./docs/screenshots/auth-center.png) | ![设置](./docs/screenshots/settings.png) |
 
-| 登录页 |
-| --- |
-| ![登录](./docs/screenshots/login.png) |
+| 登录页 | 账户菜单 |
+| --- | --- |
+| ![登录](./docs/screenshots/login.png) | ![账户](./docs/screenshots/account-menu.png) |
 
 ## 📦 快速开始
 
