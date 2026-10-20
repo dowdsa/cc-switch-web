@@ -4,9 +4,47 @@ import react from "@vitejs/plugin-react";
 
 // Web 版构建：浏览器中运行 React 界面，通过 /api/* 与 Rust 服务通信。
 // 桌面构建仍使用 vite.config.ts，互不影响。
+const webFavicon = {
+  name: "cc-switch-web-favicon",
+  transformIndexHtml(html: string) {
+    return {
+      html,
+      tags: [
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            type: "image/svg+xml",
+            href: "/favicon.svg",
+          },
+          injectTo: "head-prepend" as const,
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            type: "image/x-icon",
+            href: "/favicon.ico",
+          },
+          injectTo: "head-prepend" as const,
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "apple-touch-icon",
+            href: "/apple-touch-icon.png",
+          },
+          injectTo: "head-prepend" as const,
+        },
+      ],
+    };
+  },
+};
+
 export default defineConfig({
   root: "src",
-  plugins: [react()],
+  publicDir: path.resolve(__dirname, "public-web"),
+  plugins: [react(), webFavicon],
   base: "/",
   build: {
     outDir: "../dist-web",

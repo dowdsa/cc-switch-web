@@ -89,10 +89,6 @@ pub async fn serve(ctx: Arc<WebCtx>, options: WebOptions) -> Result<(), String> 
         .not_found_service(ServeFile::new(index));
 
     let app = Router::new()
-        .route(
-            "/favicon.ico",
-            get(|| async { StatusCode::NO_CONTENT }),
-        )
         .nest("/api", api)
         .fallback_service(static_files)
         .layer(middleware::from_fn_with_state(

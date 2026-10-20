@@ -22,7 +22,8 @@
 
 - `src-tauri/src/web/*`：axum 服务、认证（独立 `auth.db`）、SSE 事件总线、RPC 桥（覆盖前端全部 327 个命令）、上传/SQL 导出、会话 NDJSON 流与图片二进制。
 - `src/web/*`：WebGate / 登录 / 初始化 / 改密界面，以及 `@tauri-apps/*` 浏览器 shim（Vite alias 注入）。
-- `vite.config.web.ts`：Web 构建（`dist-web/`）。
+- `vite.config.web.ts`：Web 构建（`dist-web/`），仅 Web 构建注入 favicon。
+- `public-web/`：浏览器页签图标（`favicon.svg` / `favicon.ico` / `apple-touch-icon.png`，取自 CC 应用图标）。
 - `scripts/web-parity.mjs`：对比前端 `invoke` 命令与 Web RPC/覆盖实现。
 - `scripts/sync-upstream.sh`：上游版本同步（fetch、合并、校验）。
 - `scripts/publish-gitee.sh`：把当前工作树发布为 Gitee 单提交快照。
