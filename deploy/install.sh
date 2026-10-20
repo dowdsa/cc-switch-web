@@ -146,7 +146,7 @@ info "写入 systemd 服务 $UNIT_FILE"
 cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=CC Switch Web
-Documentation=https://gitee.com/lian-haoxiong/cc-switch
+Documentation=https://gitee.com/lian-haoxiong/cc-switch-web
 After=network-online.target
 Wants=network-online.target
 

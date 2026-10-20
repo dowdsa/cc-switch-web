@@ -2,7 +2,7 @@
 
 Web 二开版：浏览器中管理 Claude Code / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax 等 CLI 配置，带单管理员登录。
 
-仓库：`git@gitee.com:lian-haoxiong/cc-switch.git`（HTTPS：`https://gitee.com/lian-haoxiong/cc-switch.git`）
+仓库：`git@gitee.com:lian-haoxiong/cc-switch-web.git`（HTTPS：`https://gitee.com/lian-haoxiong/cc-switch-web.git`）
 
 ## 环境要求
 
@@ -21,7 +21,7 @@ apt-get update && apt-get install -y build-essential pkg-config curl \
 ## 一键部署
 
 ```bash
-git clone git@gitee.com:lian-haoxiong/cc-switch.git
+git clone git@gitee.com:lian-haoxiong/cc-switch-web.git
 cd cc-switch
 sudo bash deploy/install.sh
 ```
