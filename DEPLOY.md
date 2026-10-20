@@ -101,6 +101,8 @@ sudo bash deploy/install.sh --skip-build
 
 Gitee 上的 `web` 分支是**单提交快照**：包含完整可构建代码与 Web 版 README，但不包含上游 Git 历史。上游历史只保留在本地仓库，用于同步与合并。
 
+本地 `web` 分支保留完整历史且**不跟踪** `origin/web`（两者历史不同，直接 `git pull/push` 会冲突）；发布统一使用下面的脚本。
+
 公开发布：
 
 ```bash
