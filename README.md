@@ -3,8 +3,8 @@
 
   <h1>CC Switch Web</h1>
 
-  <p><strong>给私有服务器用的 CC Switch Web 管理界面</strong><br/>
-  不用 CLI/TUI · 浏览器管理 · 单管理员登录</p>
+  <p><strong>A browser UI for CC Switch, built for private servers</strong><br/>
+  No CLI/TUI needed · Browser-based · Single-admin login</p>
 
   <p>
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT" />
@@ -12,115 +12,121 @@
     <img src="https://img.shields.io/badge/UI-Web-orange.svg" alt="Web UI" />
     <img src="https://img.shields.io/badge/deploy-systemd-success.svg" alt="systemd" />
   </p>
+
+  <p>
+    <a href="./README_ZH.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red.svg" alt="中文 README" /></a>
+  </p>
 </div>
 
-![供应商管理](./docs/screenshots/providers.png)
+![Provider management](./docs/screenshots/providers.png)
 
-> 截图使用演示数据，不包含真实密钥。
+> Screenshots use demo data and contain no real API keys.
 
-## 🎯 开发初衷
+Read this in **[中文](./README_ZH.md)**.
 
-这是一个**个人自用**的二开项目，不是面向公网的产品：
+## 🎯 Why this project exists
 
-- 官方提供的是桌面应用（服务器上则需要 CLI/TUI），我不想在服务器上使用 CLI/TUI
-- 我的服务器**没有公网带宽**，也不打算把管理界面暴露到公网
-- 因此把 CC Switch 的供应商与配置管理能力做成了 Web 界面：通过本机、内网或 SSH 隧道访问，配置和数据都留在服务器上
+This is a **personal fork**, not a public product:
 
-本项目 fork 自 **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)**（基线 v4.0.16），不是官方 Web 版，与上游维护者没有隶属关系。
+- The official CC Switch is desktop-first. On a headless server it means CLI/TUI, which I don't want to use.
+- My server has **no public bandwidth**, and I don't plan to expose the admin UI to the internet.
+- So I turned its provider/config management into a web UI: use it locally, over the LAN, or through an SSH tunnel. All configs and data stay on the server.
 
-## ✨ 为什么选择 Web 版
+Forked from **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)** (baseline v4.0.16). This is **not an official web edition** and has no affiliation with the upstream maintainers.
 
-CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由能力搬到了浏览器里：
+## ✨ Why the web version
 
-- **无图形界面的 Linux 服务器也能用**：一条命令部署，打开网址即可管理
-- **完整的 CC Switch 能力**：不是简化版，供应商、路由、MCP、Skills、提示词、会话、用量全部保留
-- **面向服务器场景**：单管理员登录、改密、会话失效、登录限流、CSRF 防护
-- **数据与桌面版一致**：直接读写 `~/.claude`、`~/.codex` 等配置与同一份 SQLite 数据库
-- **一键部署与升级**：`deploy/install.sh` 自动构建并注册 systemd 服务
+CC Switch was originally a desktop app. This project brings the same provider management and routing capabilities to the browser:
 
-## 🚀 功能一览
+- **Works on headless Linux servers**: one-command deploy, then manage everything from a browser
+- **Full CC Switch capabilities**, not a cut-down UI: providers, routing, MCP, skills, prompts, sessions, usage
+- **Built for servers**: single admin account, password change, session invalidation, login throttling, CSRF protection
+- **Same data as desktop**: reads and writes real CLI configs and the same SQLite database
+- **One-command deploy/update**: `deploy/install.sh` builds and installs a systemd service
 
-### 供应商与路由
+## 🚀 Features
 
-- 新增 / 编辑 / 删除 / 排序 / 一键切换供应商
-- 直连、路由、聚合三种模式；代理接管与热切换
-- 自动故障转移、熔断器、健康检查、端点测速
-- 官方供应商预设与统一供应商（Universal Provider）
-- Claude Desktop / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax Code 全覆盖
+### Providers & routing
 
-### MCP · Skills · 提示词
+- Create / edit / delete / reorder / switch providers
+- Direct, route and stack modes; proxy takeover and hot switching
+- Automatic failover, circuit breaker, health checks, endpoint speed tests
+- Official provider presets and universal providers
+- Claude Desktop / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax Code
 
-- 统一 MCP 管理：一处维护，按应用开关自动同步到各 CLI
-- Skills 仓库、安装、更新、备份与多应用启用
-- 提示词库：编辑、启用停用、写入 `CLAUDE.md` 等目标文件
-- 项目 Profile：整套配置快照一键应用
+### MCP · Skills · Prompts
 
-### 会话与用量
+- Unified MCP management, synced to each CLI by per-app toggles
+- Skill repositories, install/update/backup and multi-app enable
+- Prompt library with enable/disable and target file sync (e.g. `CLAUDE.md`)
+- Project profiles: snapshot and apply a whole provider set
 
-- 浏览、搜索、导出各 CLI 的会话记录，支持大文件流式读取
-- 请求日志、Token/费用统计、按供应商与模型聚合
-- 订阅额度（Claude / Codex / Copilot / xAI / 编码套餐）与余额查询
+### Sessions & usage
 
-### 账号、同步与安全
+- Browse, search and export CLI sessions, with streaming reads for large logs
+- Request logs, token/cost statistics by provider and model
+- Subscription quotas (Claude / Codex / Copilot / xAI / coding plans) and balances
 
-- 授权中心：GitHub Copilot / ChatGPT / xAI OAuth 设备码登录与多账号管理
-- WebDAV / S3 同步、数据库备份、SQL 导入导出
-- 单管理员账号：Argon2id 哈希、服务端会话、改密后旧会话全部失效；账号入口固定在左侧栏底部，点击向上弹出账户菜单
-- 只监听回环的默认部署、一次性初始化令牌、登录限流、CSRF 校验
+### Accounts, sync & security
 
-## 🧩 支持的 CLI 工具
+- Auth center: GitHub Copilot / ChatGPT / xAI OAuth device flows and multi-account management
+- WebDAV / S3 sync, database backups, SQL import/export
+- Single admin: Argon2id hashing, server-side sessions, password change invalidates old sessions; the account menu lives at the bottom of the sidebar
+- Loopback-first deployment, one-time setup token, login throttling, CSRF checks
 
-| 工具 | 管理内容 |
+## 🧩 Supported CLIs
+
+| CLI | What is managed |
 | --- | --- |
-| Claude Code | 供应商切换、MCP、提示词、会话、用量 |
-| Claude Desktop | 官方/中转配置、模型路由 |
-| Codex | 供应商、认证、聚合模型、会话与用量 |
-| Gemini CLI | 供应商、MCP、会话 |
-| Grok Build | 供应商与官方登录 |
-| OpenCode | 供应商、默认模型、MCP |
-| OpenClaw | 供应商、Agents/Env/Tools、工作区文件 |
-| Hermes | 供应商、模型、记忆文件 |
-| Pi | 供应商、模型、提示词文件、会话 |
-| MiniMax Code | 供应商管理 |
+| Claude Code | Provider switching, MCP, prompts, sessions, usage |
+| Claude Desktop | Official/relay configs, model routing |
+| Codex | Providers, auth, stack models, sessions and usage |
+| Gemini CLI | Providers, MCP, sessions |
+| Grok Build | Providers and official login |
+| OpenCode | Providers, default model, MCP |
+| OpenClaw | Providers, agents/env/tools, workspace files |
+| Hermes | Providers, models, memory files |
+| Pi | Providers, models, prompt files, sessions |
+| MiniMax Code | Provider management |
 
-## 🖥 界面预览
+## 🖥 UI preview
 
-| MCP 统一管理 | 提示词库 |
+| MCP management | Prompt library |
 | --- | --- |
-| ![MCP](./docs/screenshots/mcp.png) | ![提示词](./docs/screenshots/prompts.png) |
+| ![MCP](./docs/screenshots/mcp.png) | ![Prompts](./docs/screenshots/prompts.png) |
 
-| 授权中心 | 系统设置 |
+| Auth center | Settings |
 | --- | --- |
-| ![授权中心](./docs/screenshots/auth-center.png) | ![设置](./docs/screenshots/settings.png) |
+| ![Auth center](./docs/screenshots/auth-center.png) | ![Settings](./docs/screenshots/settings.png) |
 
-| 登录页 | 账户菜单 |
+| Login | Account menu |
 | --- | --- |
-| ![登录](./docs/screenshots/login.png) | ![账户](./docs/screenshots/account-menu.png) |
+| ![Login](./docs/screenshots/login.png) | ![Account](./docs/screenshots/account-menu.png) |
 
-## 📦 快速开始
+## 📦 Quick start
 
-环境要求：Linux x64、Node.js 20+、Rust（以 `rust-toolchain.toml` 为准）、GTK/WebKit 依赖。完整说明见 [DEPLOY.md](./DEPLOY.md)。
+Requirements: Linux x64, Node.js 20+, Rust (see `rust-toolchain.toml`), GTK/WebKit dependencies. See [DEPLOY.md](./DEPLOY.md) for the full guide (Chinese).
 
 ```bash
 git clone git@gitee.com:lian-haoxiong/cc-switch-web.git
 cd cc-switch-web
 
-# 默认仅监听 127.0.0.1:8787（推荐配合 SSH 隧道或 Nginx HTTPS）
+# Listen on 127.0.0.1:8787 by default (use SSH tunnel or Nginx HTTPS)
 sudo bash deploy/install.sh
 
-# 内网直接访问
+# Direct LAN access
 sudo HOST=0.0.0.0 PORT=8787 \
-  ALLOWED_ORIGINS=http://<服务器IP>:8787 \
+  ALLOWED_ORIGINS=http://<server-ip>:8787 \
   bash deploy/install.sh
 ```
 
-首次启动会生成一次性初始化令牌，用它创建管理员账号：
+On first start, a one-time setup token is generated. Use it to create the admin account:
 
 ```bash
 cat ~/.cc-switch/web/setup-token
 ```
 
-服务管理：
+Service management:
 
 ```bash
 systemctl status cc-switch-web
@@ -128,47 +134,47 @@ systemctl restart cc-switch-web
 journalctl -u cc-switch-web -f
 ```
 
-升级：`git pull && sudo bash deploy/install.sh`，数据库与登录状态保留。
+Update: `git pull && sudo bash deploy/install.sh` (database and login state are preserved).
 
-## 🏗 架构
+## 🏗 Architecture
 
 ```text
-浏览器 (React SPA, Vite)
-   │  /api/rpc · SSE · NDJSON 流 · 上传/下载
+Browser (React SPA, Vite)
+   │  /api/rpc · SSE · NDJSON streams · uploads/downloads
    ▼
-Rust axum 服务（cargo feature "web"）
-   │  复用 CC Switch services / database / proxy
+Rust axum server (cargo feature "web")
+   │  reuses CC Switch services / database / proxy
    ▼
-~/.cc-switch/cc-switch.db   +   ~/.claude、~/.codex 等 CLI 配置
-~/.cc-switch/web/auth.db（独立认证库）
+~/.cc-switch/cc-switch.db   +   ~/.claude, ~/.codex, ... CLI configs
+~/.cc-switch/web/auth.db (separate auth database)
 ```
 
-桌面专属能力（托盘、自动更新、原生文件对话框等）在 Web 端隐藏或替换，差异与上游合并说明见 [patches.md](./patches.md)。
+Desktop-only features (tray, auto-update, native file dialogs, etc.) are hidden or replaced in the web UI. See [patches.md](./patches.md) for the change list and upstream merge notes.
 
-## 🔒 安全提醒
+## 🔒 Security notes
 
-Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务用户权限。请：
+The web UI manages server-side CLI configs; some operations run with the service user's privileges. Please:
 
-- 默认保持只监听 `127.0.0.1`，通过 SSH 隧道或 Nginx/Caddy HTTPS 访问
-- 不要直接暴露到公网；反向代理示例见 [deploy/nginx.conf.example](./deploy/nginx.conf.example)
-- 服务以哪个用户运行，就管理哪个用户的 `~/.claude` 等配置
+- Keep the default loopback binding and access it through an SSH tunnel or Nginx/Caddy HTTPS
+- Do not expose it directly to the public internet; see [deploy/nginx.conf.example](./deploy/nginx.conf.example)
+- The service runs as a specific user and manages that user's `~/.claude`, `~/.codex`, etc.
 
-## 📚 文档
+## 📚 Docs
 
-- [DEPLOY.md](./DEPLOY.md)：部署、升级、同步上游、发布快照
-- [patches.md](./patches.md)：相对上游的改动清单
-- `scripts/sync-upstream.sh`：同步上游 release
-- `scripts/publish-gitee.sh`：发布 Gitee 单提交快照
+- [DEPLOY.md](./DEPLOY.md): deployment, upgrades, upstream sync, snapshot publishing (Chinese)
+- [patches.md](./patches.md): changes relative to upstream (Chinese)
+- `scripts/sync-upstream.sh`: sync upstream releases
+- `scripts/publish-gitee.sh`: publish a single-commit snapshot to Gitee
 
-## 🙏 上游仓库与许可
+## 🙏 Upstream & license
 
-- 上游项目：**CC Switch**
-- 上游仓库：**https://github.com/farion1231/cc-switch**
-- 基线版本：v4.0.16
-- 上游作者：Jason Young
+- Upstream project: **CC Switch**
+- Upstream repository: **https://github.com/farion1231/cc-switch**
+- Baseline version: v4.0.16
+- Upstream author: Jason Young
 
-本项目为社区二开，不是官方 Web 版，与上游维护者没有隶属关系。代码与数据库结构沿用上游，Web 界面、登录认证、部署脚本等为本仓库新增。
+This is a community fork, **not an official web edition**, and is not affiliated with the upstream maintainers. The code and database structure are based on upstream; the web UI, authentication, deployment scripts and related changes are added by this repository.
 
 Based on [farion1231/cc-switch](https://github.com/farion1231/cc-switch), Copyright (c) Jason Young, licensed under the MIT License.
 
-本项目保留上游代码与版权声明，Web 二开部分按同一许可证发布。详见 [LICENSE](./LICENSE)。
+Upstream code and copyright notices are retained. The web fork is released under the same license. See [LICENSE](./LICENSE).
