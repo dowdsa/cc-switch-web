@@ -451,7 +451,7 @@ function AppNavItem({
           aria-label={tip}
           aria-current={selected ? "page" : undefined}
           className={cn(
-            "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
+            "mx-auto flex h-9 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
             selected && "bg-selected hover:bg-selected",
           )}
         >
@@ -481,11 +481,11 @@ function AppNavItem({
       onClick={onSelect}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "mx-2 flex h-7 shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
+        "mx-2 flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
         selected && "bg-selected font-medium hover:bg-selected",
       )}
     >
-      <AppGlyph app={app} size={16} badgeClassName={badgeBg} />
+      <AppGlyph app={app} size={18} badgeClassName={badgeBg} />
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {status.alert ? (
         <span
@@ -612,7 +612,7 @@ function NavItem({
           aria-label={title ?? accessibleName}
           aria-current={selected ? "page" : undefined}
           className={cn(
-            "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
+            "mx-auto flex h-9 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
             selected && "bg-selected hover:bg-selected",
           )}
         >
@@ -642,12 +642,12 @@ function NavItem({
         aria-label={trailingLabel ? accessibleName : undefined}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "flex h-7 shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
+          "flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
           compact ? "min-w-0 flex-1" : "mx-2",
           selected && "bg-selected font-medium hover:bg-selected",
         )}
       >
-        {glyph(18)}
+        {glyph(20)}
         {trailingLines.length === 0 ? (
           <span className="min-w-0 flex-1 truncate">{label}</span>
         ) : (
@@ -728,9 +728,9 @@ function SettingsDirectory({
         <button
           type="button"
           onClick={onExitSettings}
-          className="mx-2 flex h-7 shrink-0 items-center gap-2 rounded-control px-2 text-start text-fg-2 transition-colors hover:bg-subtle hover:text-fg-1"
+          className="mx-2 flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm text-fg-2 transition-colors hover:bg-subtle hover:text-fg-1"
         >
-          <ArrowLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={1.5} aria-hidden="true" />
           {t("nav.back")}
         </button>
       )}
