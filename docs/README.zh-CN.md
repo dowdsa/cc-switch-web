@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./src/assets/icons/logo.svg" width="88" alt="CC Switch Web" />
+  <img src="../src/assets/icons/logo.svg" width="88" alt="CC Switch Web" />
 
   <h1>CC Switch Web</h1>
 
@@ -14,11 +14,11 @@
   </p>
 
   <p>
-    <a href="./README.md"><img src="https://img.shields.io/badge/README-English-blue.svg" alt="English README" /></a>
+    <a href="../README.md"><img src="https://img.shields.io/badge/README-English-blue.svg" alt="English README" /></a>
   </p>
 </div>
 
-![供应商管理](./docs/screenshots/providers.png)
+![供应商管理](./screenshots/providers.png)
 
 > 截图使用演示数据，不包含真实密钥。
 
@@ -91,19 +91,19 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 
 | MCP 统一管理 | 提示词库 |
 | --- | --- |
-| ![MCP](./docs/screenshots/mcp.png) | ![提示词](./docs/screenshots/prompts.png) |
+| ![MCP](./screenshots/mcp.png) | ![提示词](./screenshots/prompts.png) |
 
 | 授权中心 | 系统设置 |
 | --- | --- |
-| ![授权中心](./docs/screenshots/auth-center.png) | ![设置](./docs/screenshots/settings.png) |
+| ![授权中心](./screenshots/auth-center.png) | ![设置](./screenshots/settings.png) |
 
 | 登录页 | 账户菜单 |
 | --- | --- |
-| ![登录](./docs/screenshots/login.png) | ![账户](./docs/screenshots/account-menu.png) |
+| ![登录](./screenshots/login.png) | ![账户](./screenshots/account-menu.png) |
 
 ## 📦 快速开始
 
-环境要求：Linux x64、Node.js 20+、Rust（以 `rust-toolchain.toml` 为准）、GTK/WebKit 依赖。完整说明见 [DEPLOY.md](./DEPLOY.md)。
+环境要求：Linux x64、Node.js 20+、Rust（以 `rust-toolchain.toml` 为准）、GTK/WebKit 依赖。完整说明见 [DEPLOY.md](../DEPLOY.md)。
 
 ```bash
 git clone git@gitee.com:lian-haoxiong/cc-switch-web.git
@@ -147,20 +147,20 @@ Rust axum 服务（cargo feature "web"）
 ~/.cc-switch/web/auth.db（独立认证库）
 ```
 
-桌面专属能力（托盘、自动更新、原生文件对话框等）在 Web 端隐藏或替换，差异与上游合并说明见 [patches.md](./patches.md)。
+桌面专属能力（托盘、自动更新、原生文件对话框等）在 Web 端隐藏或替换，差异与上游合并说明见 [patches.md](../patches.md)。
 
 ## 🔒 安全提醒
 
 Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务用户权限。请：
 
 - 默认保持只监听 `127.0.0.1`，通过 SSH 隧道或 Nginx/Caddy HTTPS 访问
-- 不要直接暴露到公网；反向代理示例见 [deploy/nginx.conf.example](./deploy/nginx.conf.example)
+- 不要直接暴露到公网；反向代理示例见 [deploy/nginx.conf.example](../deploy/nginx.conf.example)
 - 服务以哪个用户运行，就管理哪个用户的 `~/.claude` 等配置
 
 ## 📚 文档
 
-- [DEPLOY.md](./DEPLOY.md)：部署、升级、同步上游、发布快照
-- [patches.md](./patches.md)：相对上游的改动清单
+- [DEPLOY.md](../DEPLOY.md)：部署、升级、同步上游、发布快照
+- [patches.md](../patches.md)：相对上游的改动清单
 - `scripts/sync-upstream.sh`：同步上游 release
 - `scripts/publish-gitee.sh`：发布 Gitee 单提交快照
 
@@ -175,4 +175,4 @@ Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务�
 
 Based on [farion1231/cc-switch](https://github.com/farion1231/cc-switch), Copyright (c) Jason Young, licensed under the MIT License.
 
-本项目保留上游代码与版权声明，Web 二开部分按同一许可证发布。详见 [LICENSE](./LICENSE)。
+本项目保留上游代码与版权声明，Web 二开部分按同一许可证发布。详见 [LICENSE](../LICENSE)。

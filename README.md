@@ -14,7 +14,7 @@
   </p>
 
   <p>
-    <a href="./README_ZH.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red.svg" alt="中文 README" /></a>
+    <a href="./docs/README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red.svg" alt="中文 README" /></a>
   </p>
 </div>
 
@@ -22,7 +22,7 @@
 
 > Screenshots use demo data and contain no real API keys.
 
-Read this in **[中文](./README_ZH.md)**.
+Read this in **[中文](./docs/README.zh-CN.md)**.
 
 ## 🎯 Why this project exists
 
