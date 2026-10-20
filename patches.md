@@ -10,6 +10,7 @@
 | `src-tauri/src/main.rs` | `--web` / `--web-reset-password` 分支，进入 `web::run()`（不初始化 Tauri） |
 | `src-tauri/src/lib.rs` | 新增 `#[cfg(feature = "web")] pub mod web;` |
 | `src-tauri/src/commands/provider.rs` | `claude_provider_models_are_claude_safe` 改为 `pub(crate)`，供 Web 端 Claude Desktop 导入复用 |
+| `README.md` | 根 README 替换为 Web 二开说明（保留 LICENSE 与上游版权声明） |
 | `src/main.tsx` | 引入 `WebGate`；Web 未登录时跳过后端启动请求；启动渲染抽成 `renderApp()` |
 | `src/components/shell/WindowControls.tsx` | 非 Tauri 环境返回 `null` |
 | `package.json` | 新增 `dev:web` / `build:web` 脚本 |
@@ -22,6 +23,7 @@
 - `vite.config.web.ts`：Web 构建（`dist-web/`）。
 - `scripts/web-parity.mjs`：对比前端 `invoke` 命令与 Web RPC/覆盖实现。
 - `scripts/sync-upstream.sh`：上游版本同步（fetch、合并、校验）。
+- `scripts/publish-gitee.sh`：把当前工作树发布为 Gitee 单提交快照。
 - `deploy/install.sh`：一键构建、安装 systemd 服务并启动。
 - `deploy/*`：systemd 与 Nginx 示例。
 - `DEPLOY.md`：部署、升级、同步上游说明。

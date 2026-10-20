@@ -97,6 +97,18 @@ sudo bash deploy/install.sh          # 重新构建、安装并重启，数据�
 sudo bash deploy/install.sh --skip-build
 ```
 
+## 仓库发布方式（Gitee 单提交快照）
+
+Gitee 上的 `web` 分支是**单提交快照**：包含完整可构建代码与 Web 版 README，但不包含上游 Git 历史。上游历史只保留在本地仓库，用于同步与合并。
+
+公开发布：
+
+```bash
+bash scripts/publish-gitee.sh --yes
+```
+
+该脚本会把当前 `web` 工作树重新提交为一个初始提交并强制推送 `origin/web`（会重写 Gitee 历史）。已经 clone 过旧版本的机器需要重新 clone，或执行 `git fetch origin && git reset --hard origin/web`。
+
 ## 同步上游新版本
 
 ```bash
@@ -110,7 +122,7 @@ bash scripts/sync-upstream.sh v4.1.0
 bash scripts/sync-upstream.sh --apply
 ```
 
-冲突处理原则见仓库根目录 `patches.md`；Web 代码集中在 `src-tauri/src/web/`、`src/web/`，通常不冲突。
+冲突处理原则见仓库根目录 `patches.md`；Web 代码集中在 `src-tauri/src/web/`、`src/web/`，通常不冲突。`README.md` 已被替换为 Web 版说明，冲突时保留本地版本。
 
 校验包括：`tsc`、Web 构建、桌面与 Web 两种 `cargo check`、命令覆盖检查（必须 0 未覆盖）。
 
