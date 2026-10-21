@@ -2,7 +2,10 @@
 
 Web 二开版：浏览器中管理 Claude Code / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax 等 CLI 配置，带单管理员登录。
 
-仓库：`git@gitee.com:lian-haoxiong/cc-switch-web.git`（HTTPS：`https://gitee.com/lian-haoxiong/cc-switch-web.git`）
+仓库：
+
+- Gitee：`git@gitee.com:lian-haoxiong/cc-switch-web.git`
+- GitHub：`https://github.com/dowdsa/cc-switch-web.git`
 
 ## 环境要求
 
@@ -97,19 +100,19 @@ sudo bash deploy/install.sh          # 重新构建、安装并重启，数据�
 sudo bash deploy/install.sh --skip-build
 ```
 
-## 仓库发布方式（Gitee 单提交快照）
+## 仓库发布方式（Gitee / GitHub 单提交快照）
 
-Gitee 上的 `web` 分支是**单提交快照**：包含完整可构建代码与 Web 版 README，但不包含上游 Git 历史。上游历史只保留在本地仓库，用于同步与合并。
+Gitee 的 `web` 与 GitHub 的 `main` 都是**单提交快照**：包含完整可构建代码与 README，但不包含上游 Git 历史。上游历史只保留在本地仓库，用于同步与合并。
 
 本地 `web` 分支保留完整历史且**不跟踪** `origin/web`（两者历史不同，直接 `git pull/push` 会冲突）；发布统一使用下面的脚本。
 
 公开发布：
 
 ```bash
-bash scripts/publish-gitee.sh --yes
+bash scripts/publish-repos.sh --yes
 ```
 
-该脚本会把当前 `web` 工作树重新提交为一个初始提交并强制推送 `origin/web`（会重写 Gitee 历史）。已经 clone 过旧版本的机器需要重新 clone，或执行 `git fetch origin && git reset --hard origin/web`。
+该脚本会把当前 `web` 工作树重新提交为一个初始提交，并强制推送到 `origin/web`（Gitee）和 `github/main`（GitHub）。已经 clone 过旧版本的机器需要重新 clone 或重置到对应远端分支。
 
 ## 同步上游新版本
 

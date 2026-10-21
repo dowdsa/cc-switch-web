@@ -136,12 +136,12 @@ if [ "$APPLY" -eq 1 ]; then
   echo "  pnpm build:web"
   echo "  (cd src-tauri && cargo build --release --features web)"
   echo "  sudo bash deploy/install.sh --skip-build   # 重新安装并重启服务"
-  echo "  bash scripts/publish-gitee.sh --yes        # 发布单提交快照到 Gitee（重写远程历史）"
+  echo "  bash scripts/publish-repos.sh --yes        # 发布单提交快照到 Gitee/GitHub（重写远程历史）"
   echo "  # 或者你当前机器上的: /root/cc-switch-web.sh restart"
 else
   echo
   info "合并已在 $BRANCH 完成。确认无误后执行："
   echo "  git switch web && git merge --no-ff $BRANCH"
   echo "  # 重新构建并用 deploy/install.sh 部署"
-  echo "  # 最后: bash scripts/publish-gitee.sh --yes"
+  echo "  # 最后: bash scripts/publish-repos.sh --yes"
 fi

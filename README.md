@@ -14,6 +14,12 @@
   </p>
 
   <p>
+    <a href="https://gitee.com/lian-haoxiong/cc-switch-web">Gitee</a>
+    ·
+    <a href="https://github.com/dowdsa/cc-switch-web">GitHub</a>
+  </p>
+
+  <p>
     <a href="./docs/README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red.svg" alt="中文 README" /></a>
   </p>
 </div>
@@ -108,7 +114,11 @@ CC Switch was originally a desktop app. This project brings the same provider ma
 Requirements: Linux x64, Node.js 20+, Rust (see `rust-toolchain.toml`), GTK/WebKit dependencies. See [DEPLOY.md](./DEPLOY.md) for the full guide (Chinese).
 
 ```bash
+# Gitee
 git clone git@gitee.com:lian-haoxiong/cc-switch-web.git
+# or GitHub
+# git clone https://github.com/dowdsa/cc-switch-web.git
+
 cd cc-switch-web
 
 # Listen on 127.0.0.1:8787 by default (use SSH tunnel or Nginx HTTPS)
@@ -164,7 +174,7 @@ The web UI manages server-side CLI configs; some operations run with the service
 - [DEPLOY.md](./DEPLOY.md): deployment, upgrades, upstream sync, snapshot publishing (Chinese)
 - [patches.md](./patches.md): changes relative to upstream (Chinese)
 - `scripts/sync-upstream.sh`: sync upstream releases
-- `scripts/publish-gitee.sh`: publish a single-commit snapshot to Gitee
+- `scripts/publish-repos.sh`: publish a single-commit snapshot to Gitee and GitHub
 
 ## 🙏 Upstream & license
 

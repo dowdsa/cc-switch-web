@@ -14,6 +14,12 @@
   </p>
 
   <p>
+    <a href="https://gitee.com/lian-haoxiong/cc-switch-web">Gitee</a>
+    ·
+    <a href="https://github.com/dowdsa/cc-switch-web">GitHub</a>
+  </p>
+
+  <p>
     <a href="../README.md"><img src="https://img.shields.io/badge/README-English-blue.svg" alt="English README" /></a>
   </p>
 </div>
@@ -106,7 +112,11 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 环境要求：Linux x64、Node.js 20+、Rust（以 `rust-toolchain.toml` 为准）、GTK/WebKit 依赖。完整说明见 [DEPLOY.md](../DEPLOY.md)。
 
 ```bash
+# Gitee
 git clone git@gitee.com:lian-haoxiong/cc-switch-web.git
+# 或 GitHub
+# git clone https://github.com/dowdsa/cc-switch-web.git
+
 cd cc-switch-web
 
 # 默认仅监听 127.0.0.1:8787（推荐配合 SSH 隧道或 Nginx HTTPS）
@@ -162,7 +172,7 @@ Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务�
 - [DEPLOY.md](../DEPLOY.md)：部署、升级、同步上游、发布快照
 - [patches.md](../patches.md)：相对上游的改动清单
 - `scripts/sync-upstream.sh`：同步上游 release
-- `scripts/publish-gitee.sh`：发布 Gitee 单提交快照
+- `scripts/publish-repos.sh`：发布 Gitee / GitHub 单提交快照
 
 ## 🙏 上游仓库与许可
 
