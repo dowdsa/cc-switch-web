@@ -13,6 +13,9 @@
 | `README.md` | 根 README 改为英文默认版（含“中文 README”按钮与上游说明） |
 | `docs/README.zh-CN.md` | 删除上游版本后重新创建为本项目中文 README（非官方文档，避免 Gitee 中文环境抢占根 README） |
 | `README_DE.md` / `README_JA.md` | 删除上游多语言 README（含赞助商内容） |
+| `.github/workflows/` | 删除上游 CI/发布/定时工作流（不适用于 Web 仓库） |
+| `.github/dependabot.yml` | 删除上游依赖自动升级配置 |
+| `.github/labeler.yml` / `CODEOWNERS` / `FUNDING.yml` | 删除上游维护与赞助配置 |
 | `src/main.tsx` | 引入 `WebGate`；Web 未登录时跳过后端启动请求；启动渲染抽成 `renderApp()` |
 | `src/components/shell/Sidebar.tsx` | 侧栏底部挂载 Web 账号入口（`WebSidebarAccount`） |
 | `src/components/shell/WindowControls.tsx` | 非 Tauri 环境返回 `null` |
@@ -27,7 +30,7 @@
 - `public-web/`：浏览器页签图标（`favicon.svg` / `favicon.ico` / `apple-touch-icon.png`，取自 CC 应用图标）。
 - `scripts/web-parity.mjs`：对比前端 `invoke` 命令与 Web RPC/覆盖实现。
 - `scripts/sync-upstream.sh`：上游版本同步（fetch、合并、校验）。
-- `scripts/publish-repos.sh`：把当前工作树发布为 Gitee / GitHub 单提交快照。
+- `scripts/publish-repos.sh`：把当前工作树发布为 Gitee / GitHub 单提交快照，并过滤上游 CI/Dependabot 配置。
 - `deploy/install.sh`：一键构建、安装 systemd 服务并启动。
 - `deploy/*`：systemd 与 Nginx 示例。
 - `DEPLOY.md`：部署、升级、同步上游说明。

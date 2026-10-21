@@ -38,8 +38,22 @@ if [ "$YES" -ne 1 ]; then
   esac
 fi
 
-# 直接用当前树创建无父提交，不切换分支、不触碰工作区/索引。
-COMMIT="$(git commit-tree "$TREE" -m "$MESSAGE")"
+# 上游 CI / Dependabot / 维护配置不适用于 Web 仓库，即使上游合并后重新出现也从快照中过滤。
+FILTER_PATHS=(
+  .github/workflows
+  .github/dependabot.yml
+  .github/labeler.yml
+  .github/CODEOWNERS
+  .github/FUNDING.yml
+)
+INDEX_FILE="$(mktemp)"
+GIT_INDEX_FILE="$INDEX_FILE" git read-tree "$TREE"
+GIT_INDEX_FILE="$INDEX_FILE" git rm -r --cached --ignore-unmatch "${FILTER_PATHS[@]}" >/dev/null 2>&1 || true
+SNAPSHOT_TREE="$(GIT_INDEX_FILE="$INDEX_FILE" git write-tree)"
+rm -f "$INDEX_FILE"
+
+# 用过滤后的树创建无父提交，不切换分支、不触碰工作区。
+COMMIT="$(git commit-tree "$SNAPSHOT_TREE" -m "$MESSAGE")"
 git branch -f publish "$COMMIT" >/dev/null
 git push --force "$GITEE_REMOTE" "$COMMIT:refs/heads/web"
 
