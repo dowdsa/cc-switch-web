@@ -13,7 +13,7 @@
 | `README.md` | 根 README 改为英文默认版（含“中文 README”按钮与上游说明） |
 | `docs/README.zh-CN.md` | 删除上游版本后重新创建为本项目中文 README（非官方文档，避免 Gitee 中文环境抢占根 README） |
 | `README_DE.md` / `README_JA.md` | 删除上游多语言 README（含赞助商内容） |
-| `.github/workflows/` | 删除上游 CI/发布/定时工作流（不适用于 Web 仓库） |
+| `.github/workflows/` / `.github/actions/` | 删除上游 CI/发布/定时工作流及其配套 actions（不适用于 Web 仓库） |
 | `.github/dependabot.yml` | 删除上游依赖自动升级配置 |
 | `.github/labeler.yml` / `CODEOWNERS` / `FUNDING.yml` | 删除上游维护与赞助配置 |
 | `src/main.tsx` | 引入 `WebGate`；Web 未登录时跳过后端启动请求；启动渲染抽成 `renderApp()` |

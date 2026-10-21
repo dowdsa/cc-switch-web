@@ -41,6 +41,7 @@ fi
 # 上游 CI / Dependabot / 维护配置不适用于 Web 仓库，即使上游合并后重新出现也从快照中过滤。
 FILTER_PATHS=(
   .github/workflows
+  .github/actions
   .github/dependabot.yml
   .github/labeler.yml
   .github/CODEOWNERS
