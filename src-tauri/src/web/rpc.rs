@@ -35,6 +35,9 @@ pub struct WebCtx {
     pub skills: Arc<SkillService>,
     pub copilot: Arc<tokio::sync::RwLock<crate::proxy::providers::copilot_auth::CopilotAuthManager>>,
     pub xai: Arc<tokio::sync::RwLock<crate::proxy::providers::xai_oauth_auth::XaiOAuthManager>>,
+    pub kimi: crate::services::kimi_oauth::KimiOAuthManager,
+    pub agy: Arc<crate::services::agy_account::AgyAccountManager>,
+    pub claude_accounts: Arc<crate::services::claude_account::ClaudeAccountManager>,
 }
 
 #[derive(Debug)]
@@ -194,6 +197,16 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let app = arg::<String>(&args, "app")?;
             let id = arg::<String>(&args, "id")?;
             crate::services::ProviderService::remove_from_live_config(
+                &ctx.state,
+                app_type(&app)?,
+                &id,
+            )?;
+            Ok(json!(true))
+        }
+        "add_provider_to_live_config" => {
+            let app = arg::<String>(&args, "app")?;
+            let id = arg::<String>(&args, "id")?;
+            crate::services::ProviderService::add_to_live_config(
                 &ctx.state,
                 app_type(&app)?,
                 &id,
@@ -462,6 +475,11 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_default(),
+                AppType::Kimi => crate::kimi_config::data_dir(),
+                AppType::Dsh => crate::dsh_config::data_dir(),
+                AppType::Agy => crate::agy_config::agy_dir(),
+                AppType::Omp => crate::omp_config::get_omp_agent_dir()
+                    .map_err(|e| RpcError::Internal(e.to_string()))?,
             };
             Ok(json!(dir.to_string_lossy().to_string()))
         }
@@ -738,7 +756,14 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         }
         "discover_available_skills" => {
             let repos = ctx.state.db.get_skill_repos()?;
-            let result = ctx.skills.discover_available_report(repos).await?;
+            let force_refresh = args
+                .get("forceRefresh")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let result = ctx
+                .skills
+                .discover_available_report(repos, force_refresh)
+                .await?;
             Ok(serde_json::to_value(result)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -1774,6 +1799,18 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             ensure_auth_provider(&provider)?;
             let github_domain = optional_arg::<String>(&args, "githubDomain")?;
             let target_account_id = optional_arg::<String>(&args, "targetAccountId")?;
+            let login_method = optional_arg::<String>(&args, "loginMethod")?
+                .unwrap_or_else(|| "device_code".to_string());
+            if login_method != "device_code" && provider != AUTH_CODEX {
+                return Err(RpcError::BadRequest(
+                    "Unsupported login method for this auth provider".into(),
+                ));
+            }
+            if login_method == "browser" {
+                return Err(RpcError::BadRequest(
+                    "Web 模式无法接收浏览器登录回调，请改用设备代码登录".into(),
+                ));
+            }
             let response = match provider.as_str() {
                 AUTH_COPILOT => {
                     if target_account_id.is_some() {
@@ -1807,6 +1844,48 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         .await
                         .map_err(|e| RpcError::Internal(e.to_string()))?
                 }
+                AUTH_AGY => {
+                    if target_account_id.is_some() {
+                        return Err(RpcError::BadRequest(
+                            "定向重新登录仅支持 Codex OAuth".into(),
+                        ));
+                    }
+                    let start = ctx
+                        .agy
+                        .start_login()
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    return Ok(json!({
+                        "provider": provider,
+                        "deviceCode": start.flow_id,
+                        "userCode": "",
+                        "verificationUri": start.auth_url,
+                        "expiresIn": start.expires_in,
+                        "interval": 1,
+                        "browserOpened": false,
+                    }));
+                }
+                AUTH_CLAUDE => {
+                    if target_account_id.is_some() {
+                        return Err(RpcError::BadRequest(
+                            "定向重新登录仅支持 Codex OAuth".into(),
+                        ));
+                    }
+                    let start = ctx
+                        .claude_accounts
+                        .start_login()
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    return Ok(json!({
+                        "provider": provider,
+                        "deviceCode": start.flow_id,
+                        "userCode": "",
+                        "verificationUri": start.auth_url,
+                        "expiresIn": start.expires_in,
+                        "interval": 1,
+                        "browserOpened": start.browser_opened,
+                    }));
+                }
                 _ => unreachable!(),
             };
             Ok(json!({
@@ -1816,6 +1895,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 "verificationUri": response.verification_uri,
                 "expiresIn": response.expires_in,
                 "interval": response.interval,
+                "browserOpened": false,
             }))
         }
         "auth_poll_for_account" => {
@@ -1833,9 +1913,17 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         Ok(account) => {
                             let default_id =
                                 manager.get_status().await.default_account_id;
-                            Ok(json!(account.map(|account| {
-                                account_json(&provider, account, default_id.as_deref())
-                            })))
+                            match account {
+                                Some(account) => Ok(serde_json::to_value(
+                                    crate::commands::map_account(
+                                        &provider,
+                                        account,
+                                        default_id.as_deref(),
+                                    ),
+                                )
+                                .map_err(|e| RpcError::Internal(e.to_string()))?),
+                                None => Ok(json!(null)),
+                            }
                         }
                         Err(crate::proxy::providers::copilot_auth::CopilotAuthError::AuthorizationPending) => {
                             Ok(json!(null))
@@ -1855,9 +1943,17 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         Ok(account) => {
                             let default_id =
                                 manager.get_status().await.default_account_id;
-                            Ok(json!(account.map(|account| {
-                                account_json(&provider, account, default_id.as_deref())
-                            })))
+                            match account {
+                                Some(account) => Ok(serde_json::to_value(
+                                    crate::commands::map_account(
+                                        &provider,
+                                        account,
+                                        default_id.as_deref(),
+                                    ),
+                                )
+                                .map_err(|e| RpcError::Internal(e.to_string()))?),
+                                None => Ok(json!(null)),
+                            }
                         }
                         Err(crate::proxy::providers::codex_oauth_auth::CodexOAuthError::AuthorizationPending) => {
                             Ok(json!(null))
@@ -1871,14 +1967,64 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         Ok(account) => {
                             let default_id =
                                 manager.get_status().await.default_account_id;
-                            Ok(json!(account.map(|account| {
-                                xai_account_json(&provider, account, default_id.as_deref())
-                            })))
+                            match account {
+                                Some(account) => Ok(serde_json::to_value(
+                                    crate::commands::map_xai_account(
+                                        account,
+                                        default_id.as_deref(),
+                                    ),
+                                )
+                                .map_err(|e| RpcError::Internal(e.to_string()))?),
+                                None => Ok(json!(null)),
+                            }
                         }
                         Err(crate::proxy::providers::xai_oauth_auth::XaiOAuthError::AuthorizationPending) => {
                             Ok(json!(null))
                         }
                         Err(e) => Err(RpcError::Internal(e.to_string())),
+                    }
+                }
+                AUTH_AGY => {
+                    let account = ctx
+                        .agy
+                        .poll_login(&device_code)
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    let Some(account) = account else {
+                        return Ok(json!(null));
+                    };
+                    let current = ctx
+                        .agy
+                        .status()
+                        .await
+                        .ok()
+                        .and_then(|status| status.current_account_id);
+                    Ok(serde_json::to_value(crate::commands::map_agy_account(
+                        account,
+                        current.as_deref(),
+                    ))
+                    .map_err(|e| RpcError::Internal(e.to_string()))?)
+                }
+                AUTH_CLAUDE => {
+                    let account = ctx
+                        .claude_accounts
+                        .poll_login(&device_code)
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    if account.is_some() {
+                        crate::services::provider::claude_official::refresh_live_after_account_change(
+                            &ctx.state,
+                            &ctx.claude_accounts,
+                        )
+                        .await
+                        .map_err(RpcError::Internal)?;
+                    }
+                    match account {
+                        Some(account) => Ok(serde_json::to_value(
+                            crate::commands::map_claude_account(account),
+                        )
+                        .map_err(|e| RpcError::Internal(e.to_string()))?),
+                        None => Ok(json!(null)),
                     }
                 }
                 _ => unreachable!(),
@@ -1887,18 +2033,22 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "auth_cancel_login" => {
             let provider = arg::<String>(&args, "authProvider")?;
             ensure_auth_provider(&provider)?;
-            if provider != AUTH_CODEX {
-                return Err(RpcError::BadRequest(
-                    "登录取消仅支持 Codex OAuth".into(),
-                ));
-            }
             let device_code = arg::<String>(&args, "deviceCode")?;
-            Ok(json!(
-                ctx.state
-                    .codex_oauth_manager
-                    .cancel_device_flow(&device_code)
-                    .await
-            ))
+            match provider.as_str() {
+                AUTH_CODEX => Ok(json!(
+                    ctx.state
+                        .codex_oauth_manager
+                        .cancel_device_flow(&device_code)
+                        .await
+                )),
+                AUTH_AGY => Ok(json!(ctx.agy.cancel_login(&device_code).await)),
+                AUTH_CLAUDE => Ok(json!(
+                    ctx.claude_accounts.cancel_login(&device_code).await
+                )),
+                _ => Err(RpcError::BadRequest(
+                    "登录取消仅支持 Codex OAuth".into(),
+                )),
+            }
         }
         "auth_remove_account" => {
             let provider = arg::<String>(&args, "authProvider")?;
@@ -1937,6 +2087,24 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         .await
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
                 }
+                AUTH_AGY => {
+                    ctx.agy
+                        .remove(&account_id)
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                }
+                AUTH_CLAUDE => {
+                    ctx.claude_accounts
+                        .remove(&account_id)
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    crate::services::provider::claude_official::refresh_live_after_account_change(
+                        &ctx.state,
+                        &ctx.claude_accounts,
+                    )
+                    .await
+                    .map_err(RpcError::Internal)?;
+                }
                 _ => unreachable!(),
             }
             Ok(json!(null))
@@ -1968,6 +2136,17 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         .set_default_account(&account_id)
                         .await
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
+                }
+                AUTH_AGY => {
+                    ctx.agy
+                        .switch_to(&account_id)
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                }
+                AUTH_CLAUDE => {
+                    return Err(RpcError::BadRequest(
+                        "Claude 账号通过绑定它的官方供应商卡使用".into(),
+                    ));
                 }
                 _ => unreachable!(),
             }
@@ -2016,6 +2195,24 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         .clear_auth()
                         .await
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
+                }
+                AUTH_AGY => {
+                    ctx.agy
+                        .remove_all()
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                }
+                AUTH_CLAUDE => {
+                    ctx.claude_accounts
+                        .remove_all()
+                        .await
+                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    crate::services::provider::claude_official::refresh_live_after_account_change(
+                        &ctx.state,
+                        &ctx.claude_accounts,
+                    )
+                    .await
+                    .map_err(RpcError::Internal)?;
                 }
                 _ => unreachable!(),
             }
@@ -2758,15 +2955,37 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "update_pi_provider_usage_script" => {
+            let app = arg::<String>(&args, "app")?;
             let id = arg::<String>(&args, "id")?;
             let usage_script = arg::<crate::provider::UsageScript>(&args, "usageScript")?;
             let updated = crate::services::ProviderService::update_pi_usage_script(
                 &ctx.state,
+                app_type(&app)?,
                 &id,
                 usage_script,
             )
             .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(updated))
+        }
+        "get_omp_current_state" => {
+            let _guard = ctx
+                .state
+                .proxy_service
+                .lock_switch_for_app("omp")
+                .await;
+            let enabled_provider_ids = crate::omp_config::get_providers()
+                .map_err(|e| RpcError::Internal(e.to_string()))?
+                .into_keys()
+                .collect::<Vec<_>>();
+            let default_provider_id =
+                crate::omp_config::read_default_provider_id().unwrap_or_else(|error| {
+                    log::warn!("Failed to read Oh My Pi default model: {error}");
+                    None
+                });
+            Ok(json!({
+                "enabledProviderIds": enabled_provider_ids,
+                "defaultProviderId": default_provider_id,
+            }))
         }
         "get_pi_session_discovery" => {
             let discovery = crate::session_manager::providers::pi::session_discovery();
@@ -3291,6 +3510,218 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(serde_json::to_value(crate::init_status::take_skills_migration_result())
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
+        "discover_repo_skills" => {
+            let owner = arg::<String>(&args, "owner")?;
+            let name = arg::<String>(&args, "name")?;
+            let repos = ctx.state.db.get_skill_repos()?;
+            let result = match repos
+                .into_iter()
+                .find(|repo| repo.owner == owner && repo.name == name)
+            {
+                Some(repo) => ctx.skills.discover_repo(&repo).await,
+                None => Default::default(),
+            };
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "agy_account_is_running" => {
+            let running = tokio::task::spawn_blocking(crate::services::agy_account::agy_running)
+                .await
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(json!(running))
+        }
+        "agy_account_quota" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            let quota = crate::commands::agy_quota(&ctx.agy, Some(&account_id)).await?;
+            Ok(serde_json::to_value(quota)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "claude_account_submit_paste" => {
+            let flow_id = arg::<String>(&args, "flowId")?;
+            let pasted = arg::<String>(&args, "pasted")?;
+            ctx.claude_accounts
+                .submit_paste(&flow_id, &pasted)
+                .await
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(json!(null))
+        }
+        "get_claude_account_quota" => {
+            let account_id = arg::<String>(&args, "accountId")?.trim().to_string();
+            let quota = crate::services::subscription::get_claude_account_quota(
+                ctx.config_dir.clone(),
+                account_id.clone(),
+            )
+            .await;
+            if let Ok(value) = &quota {
+                ctx.state
+                    .usage_cache
+                    .put_claude_account(account_id, value.quota.clone());
+            }
+            let quota = quota.map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(quota)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "get_claude_default_plan" => {
+            let plan = tokio::task::spawn_blocking(
+                crate::services::subscription::read_claude_default_plan,
+            )
+            .await
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(plan)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "get_claude_login_switch" => {
+            let status = crate::commands::get_claude_login_switch().await?;
+            Ok(serde_json::to_value(status)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "dsh_account_status" => Ok(serde_json::to_value(
+            crate::services::dsh_account::status().await?,
+        )
+        .map_err(|e| RpcError::Internal(e.to_string()))?),
+        "dsh_account_sign_out" => {
+            crate::services::dsh_account::sign_out().await?;
+            Ok(json!(null))
+        }
+        "dsh_account_login_start" => Ok(serde_json::to_value(
+            crate::services::dsh_account::start_login().await?,
+        )
+        .map_err(|e| RpcError::Internal(e.to_string()))?),
+        "dsh_account_login_poll" => {
+            let flow_id = arg::<String>(&args, "flowId")?;
+            let done = crate::services::dsh_account::poll_login(&flow_id)?;
+            Ok(json!(done))
+        }
+        "dsh_account_login_cancel" => {
+            let flow_id = arg::<String>(&args, "flowId")?;
+            crate::services::dsh_account::cancel_login(&flow_id);
+            Ok(json!(null))
+        }
+        "kimi_oauth_status" => Ok(serde_json::to_value(ctx.kimi.status().await?)
+            .map_err(|e| RpcError::Internal(e.to_string()))?),
+        "kimi_oauth_start" => {
+            let region = arg::<crate::services::kimi_oauth::KimiRegion>(&args, "region")?;
+            let account_id = optional_arg::<String>(&args, "accountId")?;
+            let start = ctx.kimi.start(region, account_id).await?;
+            Ok(serde_json::to_value(start)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "kimi_oauth_poll" => {
+            let flow_id = arg::<String>(&args, "flowId")?;
+            let result = ctx.kimi.poll(&flow_id).await?;
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "kimi_oauth_cancel" => {
+            let flow_id = arg::<String>(&args, "flowId")?;
+            Ok(json!(ctx.kimi.cancel(&flow_id).await))
+        }
+        "kimi_oauth_remove" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            let _guard = ctx
+                .state
+                .proxy_service
+                .lock_switch_for_app("kimi")
+                .await;
+            let db = ctx.state.db.clone();
+            let id = account_id.clone();
+            ctx.kimi
+                .remove(&account_id, move || {
+                    db.delete_provider("kimi", &id)?;
+                    Ok(())
+                })
+                .await?;
+            Ok(json!(null))
+        }
+        "kimi_oauth_quota" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            let quota = ctx.kimi.quota(&account_id).await?;
+            Ok(serde_json::to_value(quota)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "kimi_oauth_models" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            let models = ctx.kimi.models(&account_id).await?;
+            Ok(serde_json::to_value(models)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "kimi_oauth_use_account" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            ctx.kimi.use_account(&account_id).await?;
+            Ok(json!(null))
+        }
+        "get_agy_models" => {
+            let api_key = optional_arg::<String>(&args, "apiKey")?;
+            let base_url = optional_arg::<String>(&args, "baseUrl")?;
+            let models = crate::commands::get_agy_models(api_key, base_url).await?;
+            Ok(serde_json::to_value(models)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "webdav_sync_clear_settings" => {
+            crate::commands::webdav_sync_clear_settings().await?;
+            Ok(json!({ "success": true }))
+        }
+        "queryProviderUsage" => {
+            let provider_id = arg::<String>(&args, "providerId")?;
+            let app = arg::<String>(&args, "app")?;
+            let app_ty = app_type(&app)?;
+            let copilot = crate::commands::CopilotAuthState(ctx.copilot.clone());
+            let xai = crate::commands::XaiOAuthState(ctx.xai.clone());
+            let result = crate::commands::query_provider_usage_inner(
+                &ctx.state,
+                &copilot,
+                &xai,
+                app_ty.clone(),
+                &provider_id,
+            )
+            .await;
+            if let Ok(snapshot) = &result {
+                ctx.state.usage_cache.put_script(
+                    app_ty.clone(),
+                    provider_id.clone(),
+                    snapshot.clone(),
+                );
+                ctx.events.publish(
+                    "usage-cache-updated",
+                    json!({
+                        "kind": "script",
+                        "appType": app_ty.as_str(),
+                        "providerId": provider_id,
+                        "data": snapshot,
+                    }),
+                );
+            }
+            let result = result.map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "testUsageScript" => {
+            let provider_id = arg::<String>(&args, "providerId")?;
+            let app = arg::<String>(&args, "app")?;
+            let script_code = arg::<String>(&args, "scriptCode")?;
+            let timeout = args.get("timeout").and_then(Value::as_u64);
+            let api_key = optional_arg::<String>(&args, "apiKey")?;
+            let base_url = optional_arg::<String>(&args, "baseUrl")?;
+            let access_token = optional_arg::<String>(&args, "accessToken")?;
+            let user_id = optional_arg::<String>(&args, "userId")?;
+            let template_type = optional_arg::<String>(&args, "templateType")?;
+            let result = crate::services::ProviderService::test_usage_script(
+                &ctx.state,
+                app_type(&app)?,
+                &provider_id,
+                &script_code,
+                timeout.unwrap_or(10),
+                api_key.as_deref(),
+                base_url.as_deref(),
+                access_token.as_deref(),
+                user_id.as_deref(),
+                template_type.as_deref(),
+            )
+            .await
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
         other => Err(RpcError::Unsupported(other.to_string())),
     }
 }
@@ -3313,52 +3744,20 @@ fn persist_s3_error(settings: &mut crate::settings::S3SyncSettings, error: &AppE
 const AUTH_COPILOT: &str = "github_copilot";
 const AUTH_CODEX: &str = "codex_oauth";
 const AUTH_XAI: &str = "xai_oauth";
+const AUTH_AGY: &str = "agy_oauth";
+const AUTH_CLAUDE: &str = "claude_official";
 
 fn ensure_auth_provider(provider: &str) -> Result<(), RpcError> {
     match provider {
-        AUTH_COPILOT | AUTH_CODEX | AUTH_XAI => Ok(()),
+        AUTH_COPILOT | AUTH_CODEX | AUTH_XAI | AUTH_AGY | AUTH_CLAUDE => Ok(()),
         other => Err(RpcError::BadRequest(format!(
             "不支持的认证提供方: {other}"
         ))),
     }
 }
 
-fn account_json(
-    provider: &str,
-    account: crate::proxy::providers::copilot_auth::GitHubAccount,
-    default_id: Option<&str>,
-) -> Value {
-    let is_default = default_id == Some(account.id.as_str());
-    json!({
-        "id": account.id,
-        "provider": provider,
-        "login": account.login,
-        "avatarUrl": account.avatar_url,
-        "authenticatedAt": account.authenticated_at,
-        "isDefault": is_default,
-        "githubDomain": account.github_domain,
-        "reauthRequired": account.reauth_required,
-        "requiresReauth": false,
-    })
-}
-
-fn xai_account_json(
-    provider: &str,
-    account: crate::proxy::providers::xai_oauth_auth::XaiOAuthAccount,
-    default_id: Option<&str>,
-) -> Value {
-    let is_default = default_id == Some(account.id.as_str());
-    json!({
-        "id": account.id,
-        "provider": provider,
-        "login": account.login,
-        "avatarUrl": account.avatar_url,
-        "authenticatedAt": account.authenticated_at,
-        "isDefault": is_default,
-        "githubDomain": account.github_domain,
-        "reauthRequired": false,
-        "requiresReauth": account.requires_reauth,
-    })
+fn account_value(account: crate::commands::ManagedAuthAccount) -> Result<Value, RpcError> {
+    serde_json::to_value(account).map_err(|e| RpcError::Internal(e.to_string()))
 }
 
 async fn auth_snapshot(
@@ -3373,8 +3772,14 @@ async fn auth_snapshot(
             let accounts = status
                 .accounts
                 .into_iter()
-                .map(|account| account_json(provider, account, default_id.as_deref()))
-                .collect();
+                .map(|account| {
+                    account_value(crate::commands::map_account(
+                        provider,
+                        account,
+                        default_id.as_deref(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             Ok((
                 status.authenticated,
                 default_id,
@@ -3388,8 +3793,14 @@ async fn auth_snapshot(
             let accounts = status
                 .accounts
                 .into_iter()
-                .map(|account| account_json(provider, account, default_id.as_deref()))
-                .collect();
+                .map(|account| {
+                    account_value(crate::commands::map_account(
+                        provider,
+                        account,
+                        default_id.as_deref(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             Ok((status.authenticated, default_id, None, accounts))
         }
         AUTH_XAI => {
@@ -3399,9 +3810,43 @@ async fn auth_snapshot(
             let accounts = status
                 .accounts
                 .into_iter()
-                .map(|account| xai_account_json(provider, account, default_id.as_deref()))
-                .collect();
+                .map(|account| {
+                    account_value(crate::commands::map_xai_account(
+                        account,
+                        default_id.as_deref(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             Ok((status.authenticated, default_id, None, accounts))
+        }
+        AUTH_AGY => {
+            let status = ctx
+                .agy
+                .status()
+                .await
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            let current = status.current_account_id.clone();
+            let accounts = status
+                .accounts
+                .into_iter()
+                .map(|account| {
+                    account_value(crate::commands::map_agy_account(
+                        account,
+                        current.as_deref(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((!accounts.is_empty(), current, None, accounts))
+        }
+        AUTH_CLAUDE => {
+            let accounts = ctx
+                .claude_accounts
+                .list()
+                .await
+                .into_iter()
+                .map(|account| account_value(crate::commands::map_claude_account(account)))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((!accounts.is_empty(), None, None, accounts))
         }
         _ => Err(RpcError::BadRequest("不支持的认证提供方".into())),
     }

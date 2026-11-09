@@ -872,7 +872,7 @@ fn build_csp(index_path: &Path) -> Option<String> {
     }
     Some(format!(
         "default-src 'self'; script-src {}; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data: blob:; font-src 'self' data:; \
+         img-src 'self' data: blob: https:; font-src 'self' data:; \
          connect-src 'self' https://models.dev; \
          frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
         script_sources.join(" ")

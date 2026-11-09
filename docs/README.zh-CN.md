@@ -36,7 +36,7 @@
 - 我的服务器**没有公网带宽**，也不打算把管理界面暴露到公网
 - 因此把 CC Switch 的供应商与配置管理能力做成了 Web 界面：通过本机、内网或 SSH 隧道访问，配置和数据都留在服务器上
 
-本项目 fork 自 **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)**（基线 v4.0.16），不是官方 Web 版，与上游维护者没有隶属关系。
+本项目 fork 自 **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)**（基线 v4.0.23），不是官方 Web 版，与上游维护者没有隶属关系。
 
 ## ✨ 为什么选择 Web 版
 
@@ -56,7 +56,7 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 - 直连、路由、聚合三种模式；代理接管与热切换
 - 自动故障转移、熔断器、健康检查、端点测速
 - 官方供应商预设与统一供应商（Universal Provider）
-- Claude Desktop / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax Code 全覆盖
+- Claude Desktop / Codex / Gemini / Antigravity / Grok / OpenCode / OpenClaw / Hermes / Pi / Kimi Code / DeepSeek Harness / Oh My Pi / MiniMax Code 全覆盖
 
 ### MCP · Skills · 提示词
 
@@ -73,7 +73,7 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 
 ### 账号、同步与安全
 
-- 授权中心：GitHub Copilot / ChatGPT / xAI OAuth 设备码登录与多账号管理
+- 授权中心：GitHub Copilot / ChatGPT / xAI OAuth 设备码登录，以及 Claude 官方 / Antigravity / Kimi / DeepSeek 账号与多账号管理
 - WebDAV / S3 同步、数据库备份、SQL 导入导出
 - 单管理员账号：Argon2id 哈希、服务端会话、改密后旧会话全部失效；账号入口固定在左侧栏底部，点击向上弹出账户菜单
 - 只监听回环的默认部署、一次性初始化令牌、登录限流、CSRF 校验
@@ -85,6 +85,10 @@ CC Switch 原本是桌面应用。本项目把同一套供应商管理与路由�
 | Claude Code | 供应商切换、MCP、提示词、会话、用量 |
 | Claude Desktop | 官方/中转配置、模型路由 |
 | Codex | 供应商、认证、聚合模型、会话与用量 |
+| Antigravity CLI | 供应商（终端启动）、MCP、会话、用量 |
+| Kimi Code | 供应商、模型、MCP、会话、用量、官方账号 |
+| DeepSeek Harness | 供应商、MCP、会话、用量、账号 |
+| Oh My Pi | 供应商、模型、MCP、会话、用量 |
 | Gemini CLI | 供应商、MCP、会话 |
 | Grok Build | 供应商与官方登录 |
 | OpenCode | 供应商、默认模型、MCP |
@@ -178,7 +182,7 @@ Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务�
 
 - 上游项目：**CC Switch**
 - 上游仓库：**https://github.com/farion1231/cc-switch**
-- 基线版本：v4.0.16
+- 基线版本：v4.0.23
 - 上游作者：Jason Young
 
 本项目为社区二开，不是官方 Web 版，与上游维护者没有隶属关系。代码与数据库结构沿用上游，Web 界面、登录认证、部署脚本等为本仓库新增。

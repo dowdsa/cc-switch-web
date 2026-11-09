@@ -19,7 +19,7 @@ function walk(dir) {
 }
 
 const invokePattern =
-  /invoke(?:<[^>]*>)?\(\s*["'`]([a-z0-9_]+)["'`]/g;
+  /invoke(?:<[^>]*>)?\(\s*["'`]([A-Za-z0-9_]+)["'`]/g;
 const frontendCommands = new Map();
 for (const file of walk(path.join(root, "src"))) {
   if (!file.endsWith(".ts") && !file.endsWith(".tsx")) continue;
@@ -36,13 +36,13 @@ const rpcCommands = new Set();
 for (const file of walk(path.join(root, "src-tauri", "src", "web"))) {
   if (!file.endsWith(".rs")) continue;
   const text = readFileSync(file, "utf8");
-  for (const match of text.matchAll(/^\s*((?:"[a-z0-9_]+"\s*\|\s*)*"[a-z0-9_]+")\s*=>/gm)) {
-    for (const name of match[1].matchAll(/"([a-z0-9_]+)"/g)) {
+  for (const match of text.matchAll(/^\s*((?:"[A-Za-z0-9_]+"\s*\|\s*)*"[A-Za-z0-9_]+")\s*=>/gm)) {
+    for (const name of match[1].matchAll(/"([A-Za-z0-9_]+)"/g)) {
       rpcCommands.add(name[1]);
     }
   }
   // 在 server.rs 中特殊分发的命令（二进制/流式）
-  for (const match of text.matchAll(/body\.cmd\s*[!=]=\s*"([a-z0-9_]+)"/g)) {
+  for (const match of text.matchAll(/body\.cmd\s*[!=]=\s*"([A-Za-z0-9_]+)"/g)) {
     rpcCommands.add(match[1]);
   }
 }
@@ -56,7 +56,7 @@ const overrideFile = path.join(
   "overrides.ts",
 );
 const overrideText = readFileSync(overrideFile, "utf8");
-for (const match of overrideText.matchAll(/case\s+"([a-z0-9_]+)":/g)) {
+for (const match of overrideText.matchAll(/case\s+"([A-Za-z0-9_]+)":/g)) {
   overrides.add(match[1]);
 }
 

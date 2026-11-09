@@ -83,6 +83,7 @@ export async function maybeOverride(
     case "open_app_config_folder":
     case "open_config_folder":
     case "open_cc_switch_skills_dir":
+    case "open_skill_dir":
     case "open_workspace_directory":
     case "reveal_app_log_file":
     case "reveal_session_path":
@@ -97,6 +98,9 @@ export async function maybeOverride(
     case "set_window_theme":
       return { handled: true };
     case "open_provider_terminal":
+      throw new Error(
+        "Web 模式无法在服务器上打开终端，请通过 SSH 登录服务器后手动运行 CLI",
+      );
     case "launch_session_terminal": {
       const command = textArg(args, "command", "providerId", "sessionId");
       if (command) {
