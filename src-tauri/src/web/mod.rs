@@ -317,6 +317,24 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
         crate::proxy::providers::xai_oauth_auth::XaiOAuthManager::new(config_dir.clone()),
     ));
 
+    // 与桌面版相同的账号管理器：授权中心新增的 Kimi / Antigravity / Claude 官方账号
+    // 都通过它们访问服务器上的 CLI 凭据。
+    let kimi = crate::services::kimi_oauth::KimiOAuthManager::default();
+    let agy = Arc::new(crate::services::agy_account::AgyAccountManager::new(
+        config_dir.clone(),
+    ));
+    let claude_accounts = Arc::new(
+        crate::services::claude_account::ClaudeAccountManager::new(config_dir.clone()),
+    );
+    {
+        let db = state.db.clone();
+        let data_dir = config_dir.clone();
+        std::thread::spawn(move || {
+            crate::services::provider::claude_official::recover_login_switch(&db);
+            crate::services::claude_account::sync_all_shared(&data_dir);
+        });
+    }
+
     let ctx = Arc::new(WebCtx {
         state,
         auth,
@@ -325,6 +343,9 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
         skills: Arc::new(crate::services::skill::SkillService::new()),
         copilot,
         xai,
+        kimi,
+        agy,
+        claude_accounts,
     });
 
     server::serve(ctx, options).await

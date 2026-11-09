@@ -38,7 +38,7 @@ This is a **personal fork**, not a public product:
 - My server has **no public bandwidth**, and I don't plan to expose the admin UI to the internet.
 - So I turned its provider/config management into a web UI: use it locally, over the LAN, or through an SSH tunnel. All configs and data stay on the server.
 
-Forked from **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)** (baseline v4.0.16). This is **not an official web edition** and has no affiliation with the upstream maintainers.
+Forked from **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)** (baseline v4.0.23). This is **not an official web edition** and has no affiliation with the upstream maintainers.
 
 ## ✨ Why the web version
 
@@ -58,7 +58,7 @@ CC Switch was originally a desktop app. This project brings the same provider ma
 - Direct, route and stack modes; proxy takeover and hot switching
 - Automatic failover, circuit breaker, health checks, endpoint speed tests
 - Official provider presets and universal providers
-- Claude Desktop / Codex / Gemini / Grok / OpenCode / OpenClaw / Hermes / Pi / MiniMax Code
+- Claude Desktop / Codex / Gemini / Antigravity / Grok / OpenCode / OpenClaw / Hermes / Pi / Kimi Code / DeepSeek Harness / Oh My Pi / MiniMax Code
 
 ### MCP · Skills · Prompts
 
@@ -75,7 +75,7 @@ CC Switch was originally a desktop app. This project brings the same provider ma
 
 ### Accounts, sync & security
 
-- Auth center: GitHub Copilot / ChatGPT / xAI OAuth device flows and multi-account management
+- Auth center: GitHub Copilot / ChatGPT / xAI OAuth device flows, Claude official / Antigravity / Kimi / DeepSeek accounts, and multi-account management
 - WebDAV / S3 sync, database backups, SQL import/export
 - Single admin: Argon2id hashing, server-side sessions, password change invalidates old sessions; the account menu lives at the bottom of the sidebar
 - Loopback-first deployment, one-time setup token, login throttling, CSRF checks
@@ -87,6 +87,10 @@ CC Switch was originally a desktop app. This project brings the same provider ma
 | Claude Code | Provider switching, MCP, prompts, sessions, usage |
 | Claude Desktop | Official/relay configs, model routing |
 | Codex | Providers, auth, stack models, sessions and usage |
+| Antigravity CLI | Providers (terminal launch), MCP, sessions, usage |
+| Kimi Code | Providers, models, MCP, sessions, usage, official account |
+| DeepSeek Harness | Providers, MCP, sessions, usage, account |
+| Oh My Pi | Providers, models, MCP, sessions, usage |
 | Gemini CLI | Providers, MCP, sessions |
 | Grok Build | Providers and official login |
 | OpenCode | Providers, default model, MCP |
@@ -180,7 +184,7 @@ The web UI manages server-side CLI configs; some operations run with the service
 
 - Upstream project: **CC Switch**
 - Upstream repository: **https://github.com/farion1231/cc-switch**
-- Baseline version: v4.0.16
+- Baseline version: v4.0.23
 - Upstream author: Jason Young
 
 This is a community fork, **not an official web edition**, and is not affiliated with the upstream maintainers. The code and database structure are based on upstream; the web UI, authentication, deployment scripts and related changes are added by this repository.
