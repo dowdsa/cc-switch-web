@@ -53,13 +53,16 @@ RUN sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}/ubuntu|g; s|http://
 #   - 通用: build-essential pkg-config python3 git
 #   - libclang: rquickjs-sys 的 bindgen 声明在 lockfile（Windows-aarch64 target 传播），
 #     按 Linux target 解析不启用，装上以防 vendoring/解析变化
-#   - arm64 交叉: g++ 交叉工具链 + :arm64 版 GTK/WebKit 头文件与库
+#   - arm64 交叉: g++ 交叉工具链 + :arm64 版 GTK/WebKit/ssl 头文件与库
 #     （.pc 在 /usr/lib/aarch64-linux-gnu/pkgconfig，头文件在共享 /usr/include）
+#   - libssl-dev:arm64: reqwest 默认 features 引入 native-tls（OpenSSL），
+#     宿主 amd64 有 libssl-dev 所以原生构建能过；交叉容器必须补 arm64 版
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       build-essential pkg-config python3 git \
       libclang-dev clang \
       g++-aarch64-linux-gnu libc6-dev-arm64-cross \
+      libssl-dev:arm64 \
       libwebkit2gtk-4.1-dev:arm64 libgtk-3-dev:arm64 librsvg2-dev:arm64 \
       libayatana-appindicator3-dev:arm64 \
  && rm -rf /var/lib/apt/lists/*
