@@ -41,6 +41,8 @@
 - `scripts/web-parity.mjs`：对比前端 `invoke` 命令与 Web RPC/覆盖实现（同时识别 CamelCase 命令，如 `queryProviderUsage`）。
 - `scripts/sync-upstream.sh`：上游版本同步（fetch、合并、校验）。
 - `scripts/publish-repos.sh`：把当前工作树发布为 Gitee / GitHub 单提交快照，并过滤上游 CI/Dependabot 配置。
+- `scripts/package-release.sh`：多架构发布打包（amd64 宿主构建 + arm64 Docker 交叉编译），输出 tar.gz 与 SHA256SUMS；`--publish <tag>` 直接创建 GitHub release。
+- `deploy/Dockerfile.build` + `deploy/cross-env.sh` + `deploy/build.sh`：arm64 交叉编译镜像（Ubuntu 22.04 基线，国内 apt/rustup 镜像可 build-arg 覆盖）。
 - `deploy/install.sh`：一键构建、安装 systemd 服务并启动。
 - `deploy/*`：systemd 与 Nginx 示例。
 - `DEPLOY.md`：部署、升级、同步上游说明。
@@ -53,6 +55,17 @@ pnpm exec vite build --config vite.config.web.ts
 cd src-tauri && cargo check && cargo check --features web
 node ../scripts/web-parity.mjs --strict   # 必须 0 未覆盖（含 CamelCase 命令）
 ```
+
+## 发布多架构包
+
+```bash
+bash scripts/package-release.sh                      # amd64 + arm64 双包到 dist-release/
+bash scripts/package-release.sh --publish v4.0.24    # 打包并创建 GitHub release（含 SHA256SUMS）
+```
+
+- amd64 在宿主直接构建；arm64 走 `deploy/Dockerfile.build` 交叉编译镜像（jammy 基线，GLIBC 2.35）。
+- jammy 的 `libwebkit2gtk-4.1-dev` amd64/arm64 变体互相 Breaks（共享 `/usr/include/webkitgtk-4.1` 头文件路径），交叉容器内只装 `:arm64` dev 库。
+- cargo 缓存挂在 `dist-release/.cargo-cache/`，重复打包不重编；该目录与 `dist-release/` 一起被 git 忽略（见 `.gitignore`）。
 
 上游新增命令会出现在 parity 的未覆盖列表里；为它补上 `src-tauri/src/web/rpc.rs` 中的分支或 `src/web/shims/overrides.ts` 的浏览器替代实现即可。
 
