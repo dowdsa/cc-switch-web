@@ -22,8 +22,15 @@ for TARGET in $TARGETS; do
   # shellcheck disable=SC1091
   source /usr/local/bin/cross-env.sh "$TARGET"
   cargo build --release --features web --target "$TARGET" --jobs "$JOBS"
-  BIN="target/$TARGET/$PROFILE/cc-switch"
-  [ -x "$BIN" ] || { echo "[build.sh] 产物缺失: $BIN" >&2; exit 1; }
+  # 产物查找: CARGO_TARGET_DIR 已设时位于 "$CARGO_TARGET_DIR/<triple>/release/"，
+  # 未设时位于 "target/<triple>/release/"。两种布局都兼容。
+  BIN=""
+  for CAND in \
+    "${CARGO_TARGET_DIR:-target}/$TARGET/$PROFILE/cc-switch" \
+    "target/$TARGET/$PROFILE/cc-switch"; do
+    [ -x "$CAND" ] && { BIN="$CAND"; break; }
+  done
+  [ -n "$BIN" ] || { echo "[build.sh] 产物缺失: target/$TARGET/$PROFILE/cc-switch（含 CARGO_TARGET_DIR=$CARGO_TARGET_DIR）" >&2; exit 1; }
   mkdir -p "$OUT/$TARGET"
   cp "$BIN" "$OUT/$TARGET/cc-switch"
   # 用 objdump 自检产物架构（容器里可能没有 file 命令）
