@@ -85,6 +85,11 @@ build_arm64() {
     -e TARGETS=aarch64-unknown-linux-gnu \
     -e CARGO_TARGET_DIR=/src/src-tauri/target-arm64 \
     ccsw-build:latest
+  # build.sh 输出到 /out/<triple>/cc-switch，摊平到 stage 根
+  [ -f "$STAGE_ROOT/arm64/aarch64-unknown-linux-gnu/cc-switch" ] \
+    || fail "容器构建未产出 /out/aarch64-unknown-linux-gnu/cc-switch"
+  mv "$STAGE_ROOT/arm64/aarch64-unknown-linux-gnu/cc-switch" "$STAGE_ROOT/arm64/cc-switch"
+  rmdir "$STAGE_ROOT/arm64/aarch64-unknown-linux-gnu" 2>/dev/null || true
   file "$STAGE_ROOT/arm64/cc-switch" | grep -q 'aarch64' || fail "arm64 产物架构异常"
 }
 
