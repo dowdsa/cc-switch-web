@@ -1,0 +1,42 @@
+# CC Switch Web — linux/arm64 交叉编译镜像（x86_64 宿主原生编译，不做 QEMU 模拟）
+#
+# 为什么不用 arm64 镜像：QEMU 模拟下编译 cc-switch 需 1 小时以上；这台机器是 x86_64，
+# 直接交叉编到 aarch64 快 10-20 倍。难点是链接需要 arm64 的 GTK/WebKit 开发库，
+# 在本机装会改系统环境 —— 容器里只装 arm64 版（不装 amd64 版，避免 multiarch 冲突）。
+#
+# 用法：
+#   docker build -f deploy/Dockerfile.cross-arm64 -t ccsw-cross-arm64 .
+#   docker run --rm -v "$PWD:/src" -v ccsw-cargo-cache-arm64:/usr/local/cargo/registry ccsw-cross-arm64
+# 产物：/src/artifacts/cc-switch（aarch64 ELF）
+FROM --platform=linux/amd64 g0kjcdya6m5rm7qrwb.xuanyuan.run/library/ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# amd64 源：阿里云镜像，显式限定 amd64（否则会去要 arm64 的索引）
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+RUN grep -q '^Architectures:' /etc/apt/sources.list.d/ubuntu.sources || sed -i '/^Components:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+
+# arm64 源：阿里云 ubuntu-ports
+RUN dpkg --add-architecture arm64 \
+ && printf 'Types: deb\nURIs: http://mirrors.aliyun.com/ubuntu-ports\nSuites: noble noble-updates\nComponents: main universe\nArchitectures: arm64\n' \
+      > /etc/apt/sources.list.d/arm64.sources
+
+# amd64 工具链 + aarch64 交叉工具链 + arm64 目标库
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config curl ca-certificates file xz-utils git \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+    libwebkit2gtk-4.1-dev:arm64 libgtk-3-dev:arm64 \
+    libayatana-appindicator3-dev:arm64 librsvg2-dev:arm64 \
+    libssl-dev:arm64 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Rust 工具链 + aarch64 target
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl -sSf https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init -o /tmp/rustup-init \
+ && chmod +x /tmp/rustup-init && /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none \
+ && rm /tmp/rustup-init
+
+WORKDIR /src
+COPY deploy/build-cross-arm64.sh /usr/local/bin/build-cross-arm64.sh
+RUN chmod +x /usr/local/bin/build-cross-arm64.sh
+ENTRYPOINT ["/usr/local/bin/build-cross-arm64.sh"]
