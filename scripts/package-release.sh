@@ -105,7 +105,8 @@ done
 summary_of_changes() { :; }  # 占位：release notes 由 --publish 分支生成
 
 make_tarball() {
-  local ARCH="$1" BIN="$STAGE_ROOT/$ARCH/cc-switch"
+  local ARCH="$1"
+  local BIN="$STAGE_ROOT/$ARCH/cc-switch"
   local DIR="cc-switch-web-v$VERSION-linux-$ARCH"
   local STAGE="$STAGE_ROOT/$DIR"
   rm -rf "$STAGE"; mkdir -p "$STAGE"
