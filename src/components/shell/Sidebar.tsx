@@ -486,7 +486,7 @@ function AppNavItem({
       onClick={onSelect}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "mx-2 flex h-nav-row w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
+        "mx-2 flex h-9 w-[280px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
         selected && "bg-selected font-medium hover:bg-selected",
       )}
     >
