@@ -29,9 +29,12 @@ import {
 } from "./lib/modelsDevAutoSync";
 import { initializeWindowActivity } from "@/lib/windowActivity";
 import { initializeInputModality } from "@/lib/inputModality";
+import { initializeInterfacePrefs } from "@/lib/interfacePrefs";
+import { disableContextMenu } from "@/lib/disableContextMenu";
 import { WebGate } from "./web/WebGate";
 
 installGlobalErrorHandlers();
+disableContextMenu();
 
 // 根据平台添加 body class，便于平台特定样式
 try {
@@ -137,6 +140,8 @@ function renderApp() {
 }
 
 async function bootstrap() {
+  // 界面密度和缩放要在任何界面渲染之前用上（含下面的数据库升级界面），首屏不会先按紧凑尺寸画一遍
+  initializeInterfacePrefs();
   const ready = await backendReady();
   if (!ready) {
     initializeWindowActivity();

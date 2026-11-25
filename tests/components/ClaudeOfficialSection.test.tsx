@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
   ClaudeBoundAccountLine,
   ClaudeOfficialSection,
 } from "@/components/providers/forms/ClaudeOfficialSection";
+import { createTestQueryClient } from "../utils/testQueryClient";
 
 const mocks = vi.hoisted(() => ({
   useManagedAuth: vi.fn(),
@@ -84,11 +85,7 @@ const loginSwitch = (overrides: Record<string, unknown> = {}) => {
 // 组件读 React Query（切换状态、账号列表），每个用例一个新的 client
 const withQuery = (node: React.ReactNode) =>
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={createTestQueryClient()}>
       {node}
     </QueryClientProvider>,
   );
@@ -126,6 +123,35 @@ describe("ClaudeOfficialSection", () => {
     expect(
       screen.queryByRole("menuitem", { name: "重新登录" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("says the link was copied when the browser is not to be opened", () => {
+    window.localStorage.setItem("cc-switch.authCenter.openBrowser", "0");
+    const auth = baseAuth();
+    Object.assign(auth, {
+      isPolling: true,
+      isAddingAccount: true,
+      pollingState: "polling",
+      deviceCode: {
+        device_code: "flow-1",
+        user_code: "",
+        verification_uri: "https://claude.com/cai/oauth/authorize?state=s",
+      },
+    });
+    mocks.useManagedAuth.mockReturnValue(auth);
+    renderSection();
+    expect(
+      screen.getByText(
+        "登录链接已复制。在你要用的浏览器里打开，登录并同意授权后这里会自动更新。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "复制登录链接" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "重新打开登录页" }),
+    ).not.toBeInTheDocument();
+    window.localStorage.removeItem("cc-switch.authCenter.openBrowser");
   });
 
   it("offers re-login once the login has expired", async () => {

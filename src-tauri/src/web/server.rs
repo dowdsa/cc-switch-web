@@ -659,7 +659,7 @@ async fn rpc_stream(
                 let transcript = loaded.transcript;
                 let header = TranscriptChunk::Header {
                     total: transcript.messages.len(),
-                    turns: transcript.turns.clone(),
+                    turns: &transcript.turns,
                     cached: loaded.cached,
                     parse_ms: loaded.parse_ms,
                 };
@@ -670,7 +670,7 @@ async fn rpc_stream(
                 for (start, end) in chunk_ranges(&transcript.message_bytes) {
                     let chunk = TranscriptChunk::Messages {
                         start,
-                        messages: transcript.messages[start..end].to_vec(),
+                        messages: &transcript.messages[start..end],
                     };
                     yield Ok(format!(
                         "{}\n",
