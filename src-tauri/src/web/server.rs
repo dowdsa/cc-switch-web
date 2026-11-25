@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,12 +17,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
+use tower_http::services::{ServeDir, ServeFile};
+
 use crate::web::auth::AuthError;
 use crate::web::rpc::{self, WebCtx};
-use crate::web::static_dist;
 use crate::web::{CookieSecure, WebOptions};
-
-use crate::services::McpService;
 
 const SESSION_COOKIE: &str = "ccsw_session";
 const SESSION_MAX_AGE_SECS: i64 = 30 * 24 * 60 * 60;
@@ -31,8 +31,6 @@ struct HttpState {
     ctx: Arc<WebCtx>,
     options: Arc<WebOptions>,
     csp: Option<String>,
-    /// 前端产物来源：磁盘目录优先，缺 `index.html` 时回落到编译期内嵌
-    static_source: static_dist::StaticSource,
 }
 
 #[derive(Clone)]
@@ -43,18 +41,18 @@ struct AuthedUser {
 }
 
 pub async fn serve(ctx: Arc<WebCtx>, options: WebOptions) -> Result<(), String> {
-    let static_source = static_dist::StaticSource::resolve(&options.dist_dir);
-    let csp = build_csp(&static_source);
-    let source_label = if static_source.has_disk() {
-        format!("磁盘目录 {}", options.dist_dir.display())
-    } else {
-        "编译期内嵌（未找到磁盘 dist-web/index.html）".to_string()
-    };
+    let index_path = options.dist_dir.join("index.html");
+    if !index_path.exists() {
+        log::warn!(
+            "前端产物不存在: {}（请先执行 pnpm build:web）",
+            index_path.display()
+        );
+    }
+    let csp = build_csp(&index_path);
     let state = Arc::new(HttpState {
         ctx,
         options: Arc::new(options),
         csp,
-        static_source,
     });
 
     let protected = Router::new()
@@ -86,9 +84,13 @@ pub async fn serve(ctx: Arc<WebCtx>, options: WebOptions) -> Result<(), String> 
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024));
 
+    let index = state.options.dist_dir.join("index.html");
+    let static_files = ServeDir::new(&state.options.dist_dir)
+        .not_found_service(ServeFile::new(index));
+
     let app = Router::new()
         .nest("/api", api)
-        .fallback(static_file_fallback)
+        .fallback_service(static_files)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             security_headers,
@@ -105,7 +107,10 @@ pub async fn serve(ctx: Arc<WebCtx>, options: WebOptions) -> Result<(), String> 
         .map(|a| a.to_string())
         .unwrap_or_else(|_| format!("{host}:{port}"));
     println!("[cc-switch-web] 已启动: http://{bound}");
-    println!("[cc-switch-web] 静态资源: {source_label}");
+    println!(
+        "[cc-switch-web] 静态资源: {}",
+        state.options.dist_dir.display()
+    );
 
     axum::serve(
         listener,
@@ -611,9 +616,6 @@ async fn rpc_stream(
     State(state): State<Arc<HttpState>>,
     Json(body): Json<RpcStreamBody>,
 ) -> Response {
-    if body.cmd == "start_mcp_connectivity_checks" {
-        return rpc_stream_mcp_checks(&state.ctx, body.args).await;
-    }
     if body.cmd != "stream_session_messages" {
         return json_error(
             StatusCode::NOT_IMPLEMENTED,
@@ -711,100 +713,8 @@ async fn rpc_stream(
         })
 }
 
-/// Web 版 MCP 连通性检查：与桌面 `start_mcp_connectivity_checks` 一致，但每个
-/// 检查结果经 NDJSON 流（`{"type":"message"}` 行）推回，最后一行 done 携带 batch id。
-async fn rpc_stream_mcp_checks(ctx: &WebCtx, args: Value) -> Response {
-    let server_ids = match args.get("serverIds") {
-        Some(value) => match serde_json::from_value::<Vec<String>>(value.clone()) {
-            Ok(ids) => ids,
-            Err(e) => {
-                return json_error(
-                    StatusCode::BAD_REQUEST,
-                    "bad_request",
-                    format!("参数 serverIds 格式错误: {e}"),
-                )
-            }
-        },
-        None => {
-            return json_error(StatusCode::BAD_REQUEST, "bad_request", "缺少 serverIds")
-        }
-    };
-    let servers = match McpService::get_all_servers(&ctx.state) {
-        Ok(servers) => servers
-            .into_iter()
-            // Use the page's enabled selection: app toggles update it optimistically,
-            // so the database's enablement flags can still lag behind the UI.
-            .filter(|(id, _)| server_ids.contains(id))
-            .map(|(_, server)| server)
-            .collect::<Vec<_>>(),
-        Err(e) => {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal",
-                e.to_string(),
-            )
-        }
-    };
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let batch_id = crate::services::mcp_connectivity::start_checks(servers, move |result| {
-        let Ok(line) = serde_json::to_string(&json!({
-            "type": "message",
-            "message": result,
-        })) else {
-            return false;
-        };
-        tx.send(format!("{line}\n")).is_ok()
-    });
-
-    let stream = async_stream::stream! {
-        while let Some(line) = rx.recv().await {
-            yield Ok::<String, Infallible>(line);
-        }
-        yield Ok(format!(
-            "{}\n",
-            json!({ "type": "done", "result": batch_id })
-        ));
-    };
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson")
-        .body(Body::from_stream(stream))
-        .unwrap_or_else(|_| {
-            json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal",
-                "构建流式响应失败",
-            )
-        })
-}
-
 async fn api_not_found() -> Response {
     json_error(StatusCode::NOT_FOUND, "not_found", "接口不存在")
-}
-
-/// SPA 静态资源：精确命中文件；未命中回落到 `index.html`（前端路由）。
-/// 用原始 URI 而不是 Path 提取器：多段路径（assets/x.js）Path<String> 解不出，
-/// 会静默变成 None 而全部回落到 index.html。
-async fn static_file_fallback(
-    State(state): State<Arc<HttpState>>,
-    uri: axum::http::Uri,
-) -> Response {
-    let path = percent_decode_path(uri.path());
-
-    if let Some((bytes, mime)) = state.static_source.read(&path) {
-        return static_dist::static_response(bytes, mime);
-    }
-    // 前端路由（如 /providers）：给 index.html，交给前端路由器
-    if let Some((bytes, mime)) = state.static_source.index() {
-        return static_dist::static_response(bytes, mime);
-    }
-    json_error(
-        StatusCode::NOT_FOUND,
-        "not_found",
-        "前端产物不存在（既无磁盘 dist-web/index.html，二进制也无内嵌资源）",
-    )
 }
 
 async fn export_sql(State(state): State<Arc<HttpState>>) -> Response {
@@ -940,29 +850,8 @@ async fn sse(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-/// URI path 里的 %XX 解码（前端文件名基本是 ASCII hash，只为稳妥处理编码字符）
-fn percent_decode_path(path: &str) -> String {
-    let bytes = path.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
-            if let Some(byte) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-fn build_csp(static_source: &static_dist::StaticSource) -> Option<String> {
-    let (html, _) = static_source.index()?;
-    let html = String::from_utf8_lossy(&html).to_string();
+fn build_csp(index_path: &Path) -> Option<String> {
+    let html = std::fs::read_to_string(index_path).ok()?;
     let script_tag = regex::Regex::new(r"(?s)<script([^>]*)>(.*?)</script>").ok()?;
     let mut script_sources = vec!["'self'".to_string()];
     for capture in script_tag.captures_iter(&html) {

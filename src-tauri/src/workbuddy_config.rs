@@ -36,7 +36,7 @@ const SHARED_FIELDS: [&str; 4] = ["vendor", "url", "apiKey", "api"];
 /// 卡片「添加」时还原那个号的登录文件（同一时间只有一张在「已添加」）。它不是自定义模型，从不写进 models.json（添加、编辑、
 /// 同步、移除、删除都跳过文件）。
 pub(crate) fn is_official_provider(provider: &crate::provider::Provider) -> bool {
-    provider.category.as_deref() == Some("official")
+    provider.has_official_category()
 }
 
 pub(crate) fn data_dir() -> PathBuf {
@@ -336,7 +336,7 @@ pub struct WorkBuddyModelOwner {
 }
 
 /// 列出 models.json 里已有的模型 id 及归属，添加 / 编辑表单据此避开被占用的 id。
-pub fn model_owners() -> Result<Vec<WorkBuddyModelOwner>, AppError> {
+pub(crate) fn model_owners() -> Result<Vec<WorkBuddyModelOwner>, AppError> {
     model_owners_at(&config_path())
 }
 

@@ -14,6 +14,8 @@ globalThis.Request = CrossFetchRequest as typeof Request;
 globalThis.Response = CrossFetchResponse as typeof Response;
 
 vi.mock("@tauri-apps/api/core", () => ({
+  // Web 二开保留 true：Web 前端在浏览器里跑，MSW mock 等价于 Tauri 后端存在
+  // 测试环境同样用它判断要不要发真实请求（如自动取汇率），保持 true 避免上游测试依赖翻转
   isTauri: () => true,
   invoke: async (command: string, payload: Record<string, unknown> = {}) => {
     const response = await fetch(`${TAURI_ENDPOINT}/${command}`, {

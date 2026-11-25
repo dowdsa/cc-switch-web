@@ -2,7 +2,6 @@ mod auth;
 mod events;
 mod rpc;
 mod server;
-mod static_dist;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -265,7 +264,7 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
         _ => {}
     }
 
-    for app in crate::app_config::AppType::all().filter(|t| !t.is_additive_mode()) {
+    for app in crate::app_config::AppType::all().filter(|t| !t.spec().additive) {
         if !crate::services::provider::should_import_default_config_on_startup(&state, &app)
             .unwrap_or(false)
         {
@@ -327,9 +326,6 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
     let claude_accounts = Arc::new(
         crate::services::claude_account::ClaudeAccountManager::new(config_dir.clone()),
     );
-    let workbuddy = Arc::new(crate::services::workbuddy_account::WorkBuddyAccountManager::new(
-        config_dir.clone(),
-    ));
     {
         let db = state.db.clone();
         let data_dir = config_dir.clone();
@@ -350,7 +346,6 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
         kimi,
         agy,
         claude_accounts,
-        workbuddy,
     });
 
     server::serve(ctx, options).await

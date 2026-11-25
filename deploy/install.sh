@@ -103,18 +103,13 @@ fi
 BIN_SRC="$REPO_DIR/src-tauri/target/release/cc-switch"
 DIST_SRC="$REPO_DIR/dist-web"
 [ -x "$BIN_SRC" ] || fail "未找到 release 二进制: $BIN_SRC（请先构建，或去掉 --skip-build）"
+[ -f "$DIST_SRC/index.html" ] || fail "未找到前端产物: $DIST_SRC/index.html"
 
 info "安装到 $INSTALL_DIR"
 install -d -m 0755 "$INSTALL_DIR"
 install -m 0755 "$BIN_SRC" "$INSTALL_DIR/cc-switch"
-# 前端目录可选：release 二进制已内嵌 dist-web；磁盘目录存在则优先用它（便于只更新前端）
-if [ -f "$DIST_SRC/index.html" ]; then
-  rm -rf "$INSTALL_DIR/dist-web"
-  cp -a "$DIST_SRC" "$INSTALL_DIR/dist-web"
-  info "已安装前端产物 $INSTALL_DIR/dist-web（磁盘目录优先于内嵌资源）"
-else
-  info "未找到 $DIST_SRC/index.html，将使用二进制内嵌的前端产物"
-fi
+rm -rf "$INSTALL_DIR/dist-web"
+cp -a "$DIST_SRC" "$INSTALL_DIR/dist-web"
 chmod -R a+rX "$INSTALL_DIR"
 
 info "写入环境配置 $ENV_FILE"
@@ -137,7 +132,7 @@ if [ "$NO_START" -eq 1 ]; then
   echo "    CC_SWITCH_WEB_HOST=$HOST CC_SWITCH_WEB_PORT=$PORT \\"
   echo "    CC_SWITCH_WEB_ALLOWED_ORIGINS='$ALLOWED_ORIGINS' \\"
   echo "    CC_SWITCH_WEB_COOKIE_SECURE=$COOKIE_SECURE \\"
-  echo "    $INSTALL_DIR/cc-switch --web"
+  echo "    $INSTALL_DIR/cc-switch --web --dist $INSTALL_DIR/dist-web"
   echo
   if [ "$HOST" = "127.0.0.1" ]; then
     echo "  访问地址: http://127.0.0.1:$PORT"
@@ -148,9 +143,6 @@ if [ "$NO_START" -eq 1 ]; then
 fi
 
 info "写入 systemd 服务 $UNIT_FILE"
-# 磁盘 dist-web 存在才传 --dist；纯内嵌部署直接 --web
-DIST_ARG=""
-[ -f "$INSTALL_DIR/dist-web/index.html" ] && DIST_ARG="--dist $INSTALL_DIR/dist-web"
 cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=CC Switch Web
@@ -164,7 +156,7 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 EnvironmentFile=$ENV_FILE
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/cc-switch --web $DIST_ARG
+ExecStart=$INSTALL_DIR/cc-switch --web --dist $INSTALL_DIR/dist-web
 Restart=on-failure
 RestartSec=3
 UMask=0077

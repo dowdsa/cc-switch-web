@@ -38,7 +38,6 @@ pub struct WebCtx {
     pub kimi: crate::services::kimi_oauth::KimiOAuthManager,
     pub agy: Arc<crate::services::agy_account::AgyAccountManager>,
     pub claude_accounts: Arc<crate::services::claude_account::ClaudeAccountManager>,
-    pub workbuddy: Arc<crate::services::workbuddy_account::WorkBuddyAccountManager>,
 }
 
 #[derive(Debug)]
@@ -112,9 +111,86 @@ fn app_type(app: &str) -> Result<AppType, RpcError> {
     AppType::from_str(app).map_err(|e| RpcError::BadRequest(e.to_string()))
 }
 
+/// 上游 DAO 已统一收 `&AppType`；把字符串参数就地转换，保持原有 BadRequest 语义。
+fn app_type_of(app: &str) -> Result<AppType, RpcError> {
+    app_type(app)
+}
+
+/// 各应用的配置目录（对齐 commands::config::app_config_dir）。
+fn app_config_dir_for(app: AppType) -> std::path::PathBuf {
+    match app {
+        AppType::Claude => crate::config::get_claude_config_dir(),
+        AppType::Codex => crate::codex_config::get_codex_config_dir(),
+        AppType::Gemini => crate::gemini_config::get_gemini_dir(),
+        AppType::GrokBuild => crate::grok_config::get_grok_config_dir(),
+        AppType::OpenCode => crate::opencode_config::get_opencode_dir(),
+        AppType::OpenClaw => crate::openclaw_config::get_openclaw_dir(),
+        AppType::Hermes => crate::hermes_config::get_hermes_dir(),
+        AppType::Pi => crate::pi_config::get_pi_agent_dir().unwrap_or_default(),
+        AppType::Mcode => crate::mcode_config::config_path()
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default(),
+        AppType::Kimi => crate::kimi_config::data_dir(),
+        AppType::Dsh => crate::dsh_config::data_dir(),
+        AppType::Agy => crate::agy_config::agy_dir(),
+        AppType::Omp => crate::omp_config::get_omp_agent_dir().unwrap_or_default(),
+        AppType::Copilot => crate::copilot_config::copilot_dir(),
+        AppType::WorkBuddy => crate::workbuddy_config::data_dir(),
+        AppType::ClaudeDesktop => crate::claude_desktop_config::get_config_library_path()
+            .unwrap_or_default(),
+    }
+}
+
+/// Web 模式下按需构造 WorkBuddy 账号管理器（桌面端在启动时 manage 一次）。
+fn workbuddy_manager() -> std::sync::Arc<crate::services::workbuddy_account::WorkBuddyAccountManager>
+{
+    std::sync::Arc::new(crate::services::workbuddy_account::WorkBuddyAccountManager::new(
+        crate::config::get_app_config_dir(),
+    ))
+}
+
+/// 读 `~/.copilot/config.json` 的 `lastLoggedInUser`（对齐 commands::copilot::copilot_cli_login）。
+fn copilot_cli_login() -> Option<(String, String)> {
+    let path = crate::copilot_config::copilot_dir().join("config.json");
+    let config = crate::copilot_config::read_json_document(&path).ok()??;
+    let user = config.get("lastLoggedInUser")?;
+    let login = user.get("login")?.as_str()?.trim().to_string();
+    if login.is_empty() {
+        return None;
+    }
+    let host = user
+        .get("host")
+        .and_then(|value| value.as_str())
+        .unwrap_or("https://github.com");
+    let domain = url::Url::parse(host)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| host.trim().trim_end_matches('/').to_string());
+    Some((login, domain))
+}
+
+fn uuid_v4() -> String {
+    // 简单的时间+随机请求 id，仅用于会话正文搜索的取消标记。
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("web-{nanos}-{:x}", std::process::id())
+}
+
+/// WorkBuddy 收录结果（对齐 commands::workbuddy_account::WorkBuddyImportResult）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkBuddyImportPayload {
+    pub account: crate::commands::ManagedAuthAccount,
+    pub created: bool,
+}
+
 fn require_proxy_app(app: &str) -> Result<AppType, RpcError> {
     let app_type = app_type(app)?;
-    if !app_type.supports_local_proxy() {
+    if !app_type.spec().local_proxy {
         return Err(RpcError::BadRequest(format!(
             "{} 不支持本地路由",
             app_type.as_str()
@@ -125,7 +201,7 @@ fn require_proxy_app(app: &str) -> Result<AppType, RpcError> {
 
 fn require_mode_app(app: &str) -> Result<AppType, RpcError> {
     let app_type = app_type(app)?;
-    if !app_type.has_route_mode() {
+    if !app_type.spec().route_mode {
         return Err(RpcError::BadRequest(format!(
             "{} 不支持本地路由",
             app_type.as_str()
@@ -289,7 +365,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         }
         "get_universal_provider" => {
             let id = arg::<String>(&args, "id")?;
-            let provider = crate::services::ProviderService::get_universal(&ctx.state, &id)?;
+            let provider = ctx.state.db.get_universal_provider(&id)?;
             Ok(serde_json::to_value(provider).map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "upsert_universal_provider" => {
@@ -423,7 +499,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(RpcError::BadRequest)?;
             ctx.state.db.set_global_proxy_url(url_opt)?;
             crate::proxy::http_client::apply_proxy(url_opt)
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "get_upstream_proxy_status" => {
@@ -442,8 +518,50 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(serde_json::to_value(info).map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "restore_env_backup" => {
+            // web-fork: 上游 v4.0.40 移除了 env_manager::restore_from_backup（备份只删不还原）。
             let backup_path = arg::<String>(&args, "backupPath")?;
-            crate::services::env_manager::restore_from_backup(backup_path)?;
+            let path = std::path::PathBuf::from(&backup_path);
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| RpcError::Internal(format!("读取备份失败: {e}")))?;
+            let backup: crate::services::env_manager::BackupInfo =
+                serde_json::from_str(&content)
+                    .map_err(|e| RpcError::Internal(format!("解析备份失败: {e}")))?;
+            for conflict in &backup.conflicts {
+                // 备份里存的是删除前的 var_value，重新写回对应来源。
+                match conflict.source_type.as_str() {
+                    "file" => {
+                        let file_path = conflict
+                            .source_path
+                            .rsplit_once(':')
+                            .map(|(p, _)| p)
+                            .ok_or_else(|| {
+                                RpcError::Internal("无效的备份来源路径".into())
+                            })?;
+                        let line = format!(
+                            "export {}={}",
+                            conflict.var_name, conflict.var_value
+                        );
+                        let mut lines: Vec<String> =
+                            std::fs::read_to_string(file_path)
+                                .map_err(|e| {
+                                    RpcError::Internal(format!("读取文件失败: {e}"))
+                                })?
+                                .lines()
+                                .map(String::from)
+                                .collect();
+                        if !lines.iter().any(|l| l.contains(&conflict.var_name)) {
+                            lines.push(line);
+                            std::fs::write(file_path, lines.join("\n"))
+                                .map_err(|e| {
+                                    RpcError::Internal(format!("写入文件失败: {e}"))
+                                })?;
+                        }
+                    }
+                    _ => {
+                        // system 来源在 Unix 上无法写回进程环境，跳过。
+                    }
+                }
+            }
             Ok(json!(null))
         }
         "get_claude_code_config_path" => Ok(json!(
@@ -501,27 +619,48 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(null))
         }
-        "get_claude_mcp_status" => Ok(serde_json::to_value(
-            crate::claude_mcp::get_mcp_status()?,
-        )
-        .map_err(|e| RpcError::Internal(e.to_string()))?),
+        "get_claude_mcp_status" => {
+            let servers = crate::claude_mcp::read_mcp_servers_map()?;
+            Ok(json!({ "servers": servers }))
+        }
         "read_claude_mcp_config" => Ok(json!(crate::claude_mcp::read_mcp_json()?)),
         "upsert_claude_mcp_server" => {
             let id = arg::<String>(&args, "id")?;
             let spec = arg::<Value>(&args, "spec")?;
-            Ok(json!(crate::claude_mcp::upsert_mcp_server(&id, spec)?))
+            let mut servers = crate::claude_mcp::read_mcp_servers_map()?;
+            servers.insert(id, spec);
+            crate::claude_mcp::set_mcp_servers_map(&servers)?;
+            Ok(json!(null))
         }
         "delete_claude_mcp_server" => {
             let id = arg::<String>(&args, "id")?;
-            Ok(json!(crate::claude_mcp::delete_mcp_server(&id)?))
+            let mut servers = crate::claude_mcp::read_mcp_servers_map()?;
+            servers.remove(&id);
+            crate::claude_mcp::set_mcp_servers_map(&servers)?;
+            Ok(json!(null))
         }
         "validate_mcp_command" => {
             let cmd = arg::<String>(&args, "cmd")?;
-            Ok(json!(crate::claude_mcp::validate_command_in_path(&cmd)?))
+            let ok = std::env::var("PATH")
+                .unwrap_or_default()
+                .split(':')
+                .any(|dir| {
+                    !dir.is_empty()
+                        && std::path::Path::new(dir).join(&cmd).is_file()
+                });
+            Ok(json!({
+                "valid": ok,
+                "command": cmd,
+            }))
         }
         "get_mcp_config" => {
             let app = arg::<String>(&args, "app")?;
-            let servers = McpService::get_servers(&ctx.state, app_type(&app)?)?;
+            let app_ty = app_type(&app)?;
+            let all = McpService::get_all_servers(&ctx.state)?;
+            let servers: Vec<&McpServer> = all
+                .values()
+                .filter(|server| server.apps.is_enabled_for(&app_ty))
+                .collect();
             Ok(json!({
                 "configPath": crate::config::get_app_config_path().to_string_lossy().to_string(),
                 "servers": servers,
@@ -577,12 +716,8 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let app = arg::<String>(&args, "app")?;
             let id = arg::<String>(&args, "id")?;
             let enabled = arg::<bool>(&args, "enabled")?;
-            Ok(json!(McpService::set_enabled(
-                &ctx.state,
-                app_type(&app)?,
-                &id,
-                enabled
-            )?))
+            McpService::toggle_app_locked(&ctx.state, &id, app_type(&app)?, enabled).await?;
+            Ok(json!(null))
         }
         "get_mcp_servers" => {
             let servers = McpService::get_all_servers(&ctx.state)?;
@@ -807,8 +942,8 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "get_skills" | "get_skills_for_app" => {
-            let repos = ctx.state.db.get_skill_repos()?;
-            let skills = ctx.skills.list_skills(repos, &ctx.state.db).await?;
+            let skills = SkillService::get_all_installed(&ctx.state.db)
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(serde_json::to_value(skills).map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "install_skill" | "install_skill_for_app" => {
@@ -833,6 +968,421 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 })?;
             ctx.skills.install(&ctx.state.db, &skill, &app_ty).await?;
             Ok(json!(true))
+        }
+        // ---- v4.0.40 新增前端命令的 Web 端实现 ----
+        "get_unreadable_providers" => {
+            let app = arg::<String>(&args, "app")?;
+            let app_ty = app_type(&app)?;
+            let entries =
+                crate::services::ProviderService::list_unreadable(&ctx.state, app_ty)
+                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(entries)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "get_unreadable_mcp_servers" => {
+            let servers = McpService::list_unreadable(&ctx.state)?;
+            Ok(serde_json::to_value(servers)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "start_mcp_connectivity_checks" => {
+            // web-fork: 桌面端经 Tauri Channel 逐条回推连通性结果；Web 端没有
+            // 每连接 channel，检查结果无法回传，返回空批次让前端按「无结果」降级。
+            Ok(json!(null))
+        }
+        "cancel_mcp_connectivity_checks" => {
+            let _batch_id = arg::<String>(&args, "batchId")?;
+            Ok(json!(null))
+        }
+        "search_session_content" => {
+            let query = arg::<String>(&args, "query")?;
+            let provider_ids = optional_arg::<Vec<String>>(&args, "providerIds")?;
+            let limit = optional_arg::<usize>(&args, "limit")?;
+            let request_id = optional_arg::<String>(&args, "requestId")?;
+            let request = crate::session_manager::search::begin_search(request_id.unwrap_or_else(
+                || uuid_v4(),
+            ));
+            let result = tokio::task::spawn_blocking(move || {
+                crate::session_manager::search::search(
+                    &query,
+                    provider_ids,
+                    limit.unwrap_or(crate::session_manager::search::DEFAULT_LIMIT),
+                    request,
+                )
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("搜索会话正文失败: {e}")))??;
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "cancel_session_content_search" => {
+            let request_id = arg::<String>(&args, "requestId")?;
+            crate::session_manager::search::cancel_search(&request_id);
+            Ok(json!(null))
+        }
+        "sync_session_index" => {
+            // web-fork: 桌面端经 AppHandle 推 session-index-status 事件；Web 端
+            // 用事件总线发布同样的状态。
+            let events = ctx.events.clone();
+            let status = crate::session_manager::search::start_sync(move |status| {
+                if let Ok(payload) = serde_json::to_value(&status) {
+                    events.publish("session-index-status", payload);
+                }
+            });
+            Ok(serde_json::to_value(status)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "clear_session_index" => {
+            tokio::task::spawn_blocking(crate::session_manager::search::clear)
+                .await
+                .map_err(|e| RpcError::Internal(format!("清除索引失败: {e}")))?
+                .map_err(RpcError::Internal)?;
+            Ok(json!(true))
+        }
+        "get_config_status" => {
+            let app = arg::<String>(&args, "app")?;
+            let status = match app_type(&app)? {
+                AppType::Claude => {
+                    let s = crate::config::get_claude_config_status();
+                    (s.exists, s.path.clone())
+                }
+                AppType::ClaudeDesktop => {
+                    let status = crate::claude_desktop_config::get_status(
+                        ctx.state.db.as_ref(),
+                        ctx.state.proxy_service.is_running().await,
+                    )?;
+                    (
+                        status.configured,
+                        status.config_library_path.unwrap_or_default(),
+                    )
+                }
+                AppType::Codex => {
+                    let auth_path = crate::codex_config::get_codex_auth_path();
+                    let config_text =
+                        crate::codex_config::read_codex_config_text().unwrap_or_default();
+                    (
+                        auth_path.exists() || !config_text.trim().is_empty(),
+                        crate::codex_config::get_codex_config_dir()
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                }
+                app_ty => {
+                    let dir = app_config_dir_for(app_ty);
+                    (dir.exists(), dir.to_string_lossy().into_owned())
+                }
+            };
+            Ok(json!({
+                "exists": status.0,
+                "path": status.1,
+            }))
+        }
+        "refresh_local_skill_metadata" => {
+            let db = ctx.state.db.clone();
+            let updated = tokio::task::spawn_blocking(move || {
+                SkillService::refresh_local_skill_metadata(&db)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("刷新 Skill 元数据失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(json!(updated))
+        }
+        "get_skill_repo_tokens" => {
+            let skills = ctx.skills.clone();
+            let list = tokio::task::spawn_blocking(move || skills.repo_token_list())
+                .await
+                .map_err(|e| RpcError::Internal(format!("读取令牌失败: {e}")))?
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(list)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "set_skill_repo_token" => {
+            let host = arg::<String>(&args, "host")?;
+            let token = arg::<String>(&args, "token")?;
+            let skills = ctx.skills.clone();
+            let normalized = tokio::task::spawn_blocking(move || {
+                skills.set_repo_token(&host, &token).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("保存令牌失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(json!(normalized))
+        }
+        "delete_skill_repo_token" => {
+            let host = arg::<String>(&args, "host")?;
+            let skills = ctx.skills.clone();
+            let normalized = tokio::task::spawn_blocking(move || {
+                skills.delete_repo_token(&host).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("删除令牌失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(json!(normalized))
+        }
+        "get_privacy_filter_config" => {
+            let config = ctx.state.db.get_privacy_filter_config()?;
+            Ok(serde_json::to_value(config)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "set_privacy_filter_config" => {
+            let config = arg::<crate::proxy::types::PrivacyFilterConfig>(&args, "config")?;
+            ctx.state
+                .db
+                .set_privacy_filter_config(&config)
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            if config.enabled {
+                std::thread::spawn(crate::proxy::privacy_filter::warm_up);
+            }
+            Ok(json!(true))
+        }
+        "fetch_exchange_rates" => {
+            let rates = crate::services::exchange_rates::fetch_usd_rates()
+                .await
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(rates)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "fetch_models_dev" => {
+            let body = crate::services::model_pricing::fetch_models_dev()
+                .await
+                .map_err(RpcError::Internal)?;
+            Ok(json!(body))
+        }
+        "diagnose_ip" => {
+            let url = arg::<String>(&args, "url")?;
+            let report = crate::services::ip_diagnostics::diagnose(&url)
+                .await
+                .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(report)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "get_auto_update_status" => {
+            // web-fork: Web 部署无桌面自动更新通道，恒报「不支持自动安装」。
+            Ok(json!({
+                "supported": false,
+                "enabled": false,
+                "downloading": false,
+                "ready": null,
+                "routingInUse": false,
+            }))
+        }
+        "download_app_update" => Ok(json!(null)),
+        // ---- 插件管理（services::plugin_manager 是纯库函数，直接复用）----
+        "list_installed_plugins" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::list_installed(app)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "list_plugin_catalog" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::list_catalog(app)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "list_plugin_marketplaces" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::list_marketplaces(app)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "install_plugin" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let id = arg::<String>(&args, "id")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::install_plugin(app, &id)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "uninstall_plugin" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let id = arg::<String>(&args, "id")?;
+            let db = ctx.state.db.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::uninstall_plugin(&db, app, &id)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "update_plugin" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let id = arg::<String>(&args, "id")?;
+            let db = ctx.state.db.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::update_plugin(&db, app, &id)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "set_plugin_enabled" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let id = arg::<String>(&args, "id")?;
+            let enabled = arg::<bool>(&args, "enabled")?;
+            let db = ctx.state.db.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::set_plugin_enabled(&db, app, &id, enabled)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "add_plugin_marketplace" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let source = arg::<String>(&args, "source")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::add_marketplace(app, &source)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "remove_plugin_marketplace" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let name = arg::<String>(&args, "name")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::remove_marketplace(app, &name)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "refresh_plugin_marketplaces" => {
+            let app = arg::<crate::services::plugin_manager::PluginApp>(&args, "app")?;
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::services::plugin_manager::refresh_marketplaces(app)
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("插件任务失败: {e}")))?
+            .map_err(RpcError::Internal)?;
+            Ok(serde_json::to_value(outcome)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "s3_sync_clear_settings" => {
+            crate::settings::set_s3_sync_settings(None)
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(json!({ "success": true }))
+        }
+        "copilot_cli_signed_in_account" => {
+            let Some((login, github_domain)) = copilot_cli_login() else {
+                return Ok(json!(null));
+            };
+            let accounts = ctx.copilot.read().await.list_accounts().await;
+            let account_id = accounts
+                .iter()
+                .find(|account| {
+                    account.login.eq_ignore_ascii_case(&login)
+                        && account.github_domain.eq_ignore_ascii_case(&github_domain)
+                })
+                .map(|account| account.id.clone());
+            Ok(json!({
+                "login": login,
+                "githubDomain": github_domain,
+                "accountId": account_id,
+            }))
+        }
+        // ---- WorkBuddy 官方账号 ----
+        "workbuddy_model_owners" => {
+            let owners = tokio::task::spawn_blocking(crate::workbuddy_config::model_owners)
+                .await
+                .map_err(|e| RpcError::Internal(format!("读取 models.json 失败: {e}")))?
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(owners)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "workbuddy_account_live_state" => {
+            let manager = workbuddy_manager();
+            let state = tokio::task::spawn_blocking(move || manager.live_state())
+                .await
+                .map_err(|e| RpcError::Internal(format!("读取 WorkBuddy 状态失败: {e}")))?;
+            Ok(serde_json::to_value(state)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "workbuddy_account_import_current" => {
+            let manager = workbuddy_manager();
+            let result = tokio::task::spawn_blocking(move || {
+                let outcome = manager.import_current()?;
+                let current = manager.status()?.current_account_id;
+                Ok(crate::web::rpc::WorkBuddyImportPayload {
+                    account: crate::commands::map_workbuddy_account(
+                        outcome.account,
+                        current.as_deref(),
+                    ),
+                    created: outcome.created,
+                })
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("收录 WorkBuddy 账号失败: {e}")))?
+            .map_err(|e: crate::error::AppError| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(result)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
+        }
+        "workbuddy_account_prepare_new_login" => {
+            let reauth_account_id = optional_arg::<String>(&args, "reauthAccountId")?;
+            let manager = workbuddy_manager();
+            let captured = tokio::task::spawn_blocking(move || {
+                match reauth_account_id.as_deref() {
+                    Some(account_id) => manager.prepare_reauth(account_id),
+                    None => manager.prepare_new_login(),
+                }
+            })
+            .await
+            .map_err(|e| RpcError::Internal(format!("准备登录失败: {e}")))?
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(json!(captured.map(|account| {
+                crate::commands::map_workbuddy_account(account, None)
+            })))
+        }
+        "workbuddy_account_open_app" => {
+            // web-fork: 上游 open_workbuddy 是命令私有实现且依赖桌面环境；
+            // 服务器通常无桌面环境，返回降级错误让前端提示用户本机打开。
+            Err(RpcError::Unsupported(
+                "workbuddy_account_open_app".to_string(),
+            ))
+        }
+        "workbuddy_account_quota" => {
+            let account_id = arg::<String>(&args, "accountId")?;
+            let force = optional_arg::<bool>(&args, "force")?.unwrap_or(false);
+            let manager = workbuddy_manager();
+            let quota = crate::services::workbuddy_account::account_quota(
+                manager,
+                account_id,
+                force,
+            )
+            .await
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            Ok(serde_json::to_value(quota)
+                .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "uninstall_skill" | "uninstall_skill_for_app" => {
             let directory = arg::<String>(&args, "directory")?;
@@ -1028,11 +1578,13 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(null))
         }
         "check_provider_limits" => {
-            let provider_id = arg::<String>(&args, "providerId")?;
-            let app_type = arg::<String>(&args, "appType")?;
-            let status = ctx.state.db.check_provider_limits(&provider_id, &app_type)?;
-            Ok(serde_json::to_value(status)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
+            // web-fork: 上游 v4.0.40 移除了数据库层的 check_provider_limits，
+            // Web 端无桌面限流服务可查，返回"未受限"的占位状态，前端降级展示。
+            let _provider_id = arg::<String>(&args, "providerId")?;
+            let _app_type = arg::<String>(&args, "appType")?;
+            Ok(json!({
+                "error": "removed in v4.0.40",
+            }))
         }
         "delete_model_pricing" => {
             let model_id = arg::<String>(&args, "modelId")?;
@@ -1072,16 +1624,15 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "get_usage_data_sources" => {
-            let rows = crate::services::session_usage::get_data_source_breakdown(&ctx.state.db)?;
-            Ok(serde_json::to_value(rows)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
+            // web-fork: 上游 v4.0.40 移除了 get_data_source_breakdown，返回空清单降级。
+            Ok(json!([] as [&str; 0]))
         }
         "start_proxy_server" => Ok(serde_json::to_value(
             ctx.state
                 .proxy_service
                 .start()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
+                .map_err(RpcError::Internal)?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
         "stop_proxy_server" => {
@@ -1090,14 +1641,12 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .proxy_service
                 .get_takeover_status()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             if takeover.claude
                 || takeover.codex
                 || takeover.gemini
                 || takeover.grokbuild
                 || takeover.claude_desktop
-                || takeover.opencode
-                || takeover.openclaw
             {
                 return Err(RpcError::BadRequest(
                     "仍有应用处于代理接管状态，请先关闭对应应用接管后再停止本地路由。".into(),
@@ -1107,13 +1656,13 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .proxy_service
                 .stop()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "stop_proxy_with_restore" => {
             crate::mode::controller::exit_all(&ctx.state)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "get_proxy_takeover_status" => Ok(serde_json::to_value(
@@ -1121,7 +1670,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .proxy_service
                 .get_takeover_status()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
+                .map_err(RpcError::Internal)?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
         "set_proxy_takeover_for_app" => {
@@ -1138,11 +1687,11 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     route.as_deref(),
                 )
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             } else {
                 crate::mode::controller::exit(&ctx.state, &app)
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    .map_err(RpcError::Internal)?;
             }
             Ok(json!(null))
         }
@@ -1164,7 +1713,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 &provider_id,
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             ctx.events.publish(
                 "provider-switched",
                 json!({ "appType": app_str, "providerId": provider_id }),
@@ -1180,7 +1729,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let stack = arg::<bool>(&args, "stack")?;
             let apps = crate::mode::controller::exit_apps_in_mode(&ctx.state, stack)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(apps))
         }
         "get_direct_provider" => {
@@ -1195,7 +1744,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let app = require_mode_app(&app_str)?;
             let view = crate::mode::controller::stack_view_with_clients(&ctx.state, &app)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(view)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -1204,30 +1753,36 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .proxy_service
                 .get_status()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
+                .map_err(RpcError::Internal)?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
-        "get_proxy_config" => Ok(serde_json::to_value(
-            ctx.state
-                .proxy_service
-                .get_config()
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
-        )
-        .map_err(|e| RpcError::Internal(e.to_string()))?),
+        "get_proxy_config" => {
+            let config = ctx.state.db.get_global_proxy_config().await?;
+            Ok(json!({
+                "listen_address": config.listen_address,
+                "listen_port": config.listen_port,
+                "enable_logging": config.enable_logging,
+            }))
+        }
         "update_proxy_config" => {
-            let config = arg::<crate::proxy::types::ProxyConfig>(&args, "config")?;
-            if ctx
-                .state
-                .proxy_service
-                .update_config(&config)
+            let listen_address = arg::<String>(&args, "listen_address")
+                .or_else(|_| arg::<String>(&args, "listenAddress"))?;
+            let listen_port = arg::<u16>(&args, "listen_port")
+                .or_else(|_| arg::<u16>(&args, "listenPort"))?;
+            let enable_logging = arg::<bool>(&args, "enable_logging")
+                .or_else(|_| arg::<bool>(&args, "enableLogging"))?;
+            let mut config = ctx.state.db.get_global_proxy_config().await?;
+            config.listen_address = listen_address;
+            config.listen_port = listen_port;
+            config.enable_logging = enable_logging;
+            ctx.state
+                .db
+                .update_global_proxy_config(config)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-            {
-                crate::mode::controller::resync_routes(&ctx.state)
-                    .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
-            }
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            crate::mode::controller::resync_routes(&ctx.state)
+                .await
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "get_global_proxy_config" => Ok(serde_json::to_value(
@@ -1245,11 +1800,11 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .proxy_service
                 .update_global_config(&config)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             if restarted {
                 crate::mode::controller::resync_routes(&ctx.state)
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    .map_err(RpcError::Internal)?;
             }
             Ok(json!(null))
         }
@@ -1262,16 +1817,16 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             crate::mode::controller::resync_routes(&ctx.state)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "get_proxy_config_for_app" => {
             let app_str = arg::<String>(&args, "appType")?;
-            require_proxy_app(&app_str)?;
+            let app = require_proxy_app(&app_str)?;
             let config = ctx
                 .state
                 .db
-                .get_proxy_config_for_app(&app_str)
+                .get_proxy_config_for_app(&app)
                 .await
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(serde_json::to_value(config)
@@ -1290,13 +1845,14 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             ctx.state
                 .proxy_service
-                .update_circuit_breaker_config_for_app(&app_type_str, circuit_config)
+                .update_circuit_breaker_config_for_app(&app_type(&app_type_str)?, circuit_config)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "get_pricing_model_source" => {
-            let app_type = arg::<String>(&args, "appType")?;
+            let app_str = arg::<String>(&args, "appType")?;
+            let app_type = app_type_of(&app_str)?;
             let source = ctx
                 .state
                 .db
@@ -1306,7 +1862,8 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(source))
         }
         "set_pricing_model_source" => {
-            let app_type = arg::<String>(&args, "appType")?;
+            let app_str = arg::<String>(&args, "appType")?;
+            let app_type = app_type_of(&app_str)?;
             let value = arg::<String>(&args, "value")?;
             ctx.state
                 .db
@@ -1316,20 +1873,26 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(null))
         }
         "is_proxy_running" => Ok(json!(ctx.state.proxy_service.is_running().await)),
-        "is_live_takeover_active" => Ok(json!(
-            ctx.state
+        "is_live_takeover_active" => {
+            let status = ctx
+                .state
                 .proxy_service
-                .is_takeover_active()
+                .get_takeover_status()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-        )),
+                .map_err(RpcError::Internal)?;
+            Ok(json!(status.claude
+                || status.codex
+                || status.gemini
+                || status.grokbuild
+                || status.claude_desktop))
+        }
         "switch_proxy_provider" => {
             let app_str = arg::<String>(&args, "appType")?;
             let provider_id = arg::<String>(&args, "providerId")?;
             let app = require_mode_app(&app_str)?;
-            crate::mode::controller::switch_route(&ctx.state, &app, &provider_id)
+            crate::mode::controller::set_route(&ctx.state, &app, &provider_id)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             ctx.events.publish(
                 "provider-switched",
                 json!({ "appType": app_str, "providerId": provider_id }),
@@ -1338,8 +1901,8 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         }
         "get_provider_health" => {
             let provider_id = arg::<String>(&args, "providerId")?;
-            let app_type = arg::<String>(&args, "appType")?;
-            require_mode_app(&app_type)?;
+            let app_str = arg::<String>(&args, "appType")?;
+            let app_type = require_mode_app(&app_str)?;
             let health = ctx
                 .state
                 .db
@@ -1351,44 +1914,60 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         }
         "reset_circuit_breaker" => {
             let provider_id = arg::<String>(&args, "providerId")?;
-            let app_type = arg::<String>(&args, "appType")?;
-            require_proxy_app(&app_type)?;
+            let app_str = arg::<String>(&args, "appType")?;
+            let app_type = require_proxy_app(&app_str)?;
+            // web-fork: 上游把重置熔断器并入 update_provider_health_with_threshold。
             ctx.state
                 .db
-                .update_provider_health(&provider_id, &app_type, true, None)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            ctx.state
-                .proxy_service
-                .reset_provider_circuit_breaker(&provider_id, &app_type)
+                .update_provider_health_with_threshold(
+                    &provider_id,
+                    &app_type,
+                    true,
+                    None,
+                    crate::proxy::CircuitBreakerConfig::default().failure_threshold,
+                )
                 .await
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             ctx.events.publish(
                 "provider-health-updated",
-                json!({ "providerId": provider_id, "appType": app_type }),
+                json!({ "providerId": provider_id, "appType": app_str }),
             );
             Ok(json!(null))
         }
         "get_circuit_breaker_config" => Ok(serde_json::to_value(
             ctx.state
                 .db
-                .get_circuit_breaker_config()
-                .await
+                .get_rectifier_config()
                 .map_err(|e| RpcError::Internal(e.to_string()))?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
         "update_circuit_breaker_config" => {
+            // web-fork: 上游 v4.0.40 全局熔断器配置并入 per-app 熔断器 / 整流器配置，
+            // 这里对全部支持本地路由的应用逐个套用同一份配置。
             let config = arg::<crate::proxy::CircuitBreakerConfig>(&args, "config")?;
-            ctx.state
-                .db
-                .update_circuit_breaker_config(&config)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            ctx.state
-                .proxy_service
-                .update_circuit_breaker_configs(config)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+            for app in crate::app_config::AppType::all().filter(|t| t.spec().local_proxy) {
+                let mut app_config = ctx
+                    .state
+                    .db
+                    .get_proxy_config_for_app(&app)
+                    .await
+                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+                app_config.circuit_failure_threshold = config.failure_threshold;
+                app_config.circuit_success_threshold = config.success_threshold;
+                app_config.circuit_timeout_seconds = config.timeout_seconds as u32;
+                app_config.circuit_error_rate_threshold = config.error_rate_threshold;
+                app_config.circuit_min_requests = config.min_requests;
+                ctx.state
+                    .db
+                    .update_proxy_config_for_app(app_config)
+                    .await
+                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+                ctx.state
+                    .proxy_service
+                    .update_circuit_breaker_config_for_app(&app, config.clone())
+                    .await
+                    .map_err(RpcError::Internal)?;
+            }
             Ok(json!(null))
         }
         "get_circuit_breaker_stats" => Ok(json!(null)),
@@ -1414,16 +1993,17 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "adopt_codex_stack_catalog" => {
             let hint = crate::mode::controller::adopt_codex_stack_catalog(&ctx.state)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(hint))
         }
         "get_failover_queue" => {
             let app_type = arg::<String>(&args, "appType")?;
             require_proxy_app(&app_type)?;
+            let app = app_type_of(&app_type)?;
             let queue = ctx
                 .state
                 .db
-                .get_failover_queue(&app_type)
+                .get_failover_queue(&app)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(serde_json::to_value(queue)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
@@ -1431,15 +2011,16 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "get_available_providers_for_failover" => {
             let app_type = arg::<String>(&args, "appType")?;
             require_proxy_app(&app_type)?;
+            let app = app_type_of(&app_type)?;
             let providers = ctx
                 .state
                 .db
-                .get_available_providers_for_failover(&app_type)
+                .get_failover_providers(&app)
                 .map_err(|e| RpcError::Internal(e.to_string()))?
                 .into_iter()
                 .filter(|provider| {
                     crate::proxy::provider_router::provider_supports_failover(
-                        &app_type, provider,
+                        &app, provider,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -1450,14 +2031,15 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let app_type = arg::<String>(&args, "appType")?;
             let provider_id = arg::<String>(&args, "providerId")?;
             require_proxy_app(&app_type)?;
+            let app = app_type_of(&app_type)?;
             let provider = ctx
                 .state
                 .db
-                .get_provider_by_id(&provider_id, &app_type)
+                .get_provider_by_id(&provider_id, &app)
                 .map_err(|e| RpcError::Internal(e.to_string()))?
                 .ok_or_else(|| RpcError::BadRequest(format!("供应商不存在: {provider_id}")))?;
             if !crate::proxy::provider_router::provider_supports_failover(
-                &app_type, &provider,
+                &app, &provider,
             ) {
                 return Err(RpcError::BadRequest(
                     "该供应商不支持自动故障转移".into(),
@@ -1465,17 +2047,17 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             }
             ctx.state
                 .db
-                .add_to_failover_queue(&app_type, &provider_id)
+                .add_to_failover_queue(&app, &provider_id)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(null))
         }
         "remove_from_failover_queue" => {
             let app_type = arg::<String>(&args, "appType")?;
             let provider_id = arg::<String>(&args, "providerId")?;
-            require_proxy_app(&app_type)?;
+            let app = require_proxy_app(&app_type)?;
             ctx.state
                 .db
-                .remove_from_failover_queue(&app_type, &provider_id)
+                .remove_from_failover_queue(&app, &provider_id)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(null))
         }
@@ -1485,7 +2067,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let config = ctx
                 .state
                 .db
-                .get_proxy_config_for_app(&app_type)
+                .get_proxy_config_for_app(&app_type_of(&app_type)?)
                 .await
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(config.auto_failover_enabled))
@@ -1498,7 +2080,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let mut config = ctx
                 .state
                 .db
-                .get_proxy_config_for_app(&app_str)
+                .get_proxy_config_for_app(&app)
                 .await
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             if enabled && !crate::mode::current::is_proxy(&app) {
@@ -1511,18 +2093,18 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 let all_providers = ctx
                     .state
                     .db
-                    .get_all_providers(&app_str)
+                    .get_all_providers(&app)
                     .map_err(|e| RpcError::Internal(e.to_string()))?;
                 let mut queue = ctx
                     .state
                     .db
-                    .get_failover_queue(&app_str)
+                    .get_failover_queue(&app)
                     .map_err(|e| RpcError::Internal(e.to_string()))?
                     .into_iter()
                     .filter(|item| {
                         all_providers.get(&item.provider_id).is_some_and(|provider| {
                             crate::proxy::provider_router::provider_supports_failover(
-                                &app_str, provider,
+                                &app, provider,
                             )
                         })
                     })
@@ -1541,19 +2123,19 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     })?;
                     ctx.state
                         .db
-                        .add_to_failover_queue(&app_str, &current_id)
+                        .add_to_failover_queue(&app, &current_id)
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
                     auto_added = Some(current_id);
                     queue = ctx
                         .state
                         .db
-                        .get_failover_queue(&app_str)
+                        .get_failover_queue(&app)
                         .map_err(|e| RpcError::Internal(e.to_string()))?
                         .into_iter()
                         .filter(|item| {
                             all_providers.get(&item.provider_id).is_some_and(|provider| {
                                 crate::proxy::provider_router::provider_supports_failover(
-                                    &app_str, provider,
+                                    &app, provider,
                                 )
                             })
                         })
@@ -1581,7 +2163,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         let _ = ctx
                             .state
                             .db
-                            .remove_from_failover_queue(&app_str, &provider_id);
+                            .remove_from_failover_queue(&app, &provider_id);
                     }
                     return Err(RpcError::Internal(error));
                 }
@@ -1758,254 +2340,13 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "set_copilot_optimizer_config" => {
             let config =
                 arg::<crate::proxy::types::CopilotOptimizerConfig>(&args, "config")?;
+            let json = serde_json::to_string(&config)
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
             ctx.state
                 .db
-                .set_copilot_optimizer_config(&config)
+                .set_setting("copilot_optimizer_config", &json)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(true))
-        }
-        "get_privacy_filter_config" => Ok(serde_json::to_value(
-            ctx.state
-                .db
-                .get_privacy_filter_config()
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
-        )
-        .map_err(|e| RpcError::Internal(e.to_string()))?),
-        "set_privacy_filter_config" => {
-            let config = arg::<crate::proxy::types::PrivacyFilterConfig>(&args, "config")?;
-            ctx.state
-                .db
-                .set_privacy_filter_config(&config)
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            if config.enabled {
-                // 规则编译有一次性耗时，开关打开时在后台预热，不压到第一个请求上
-                std::thread::spawn(crate::proxy::privacy_filter::warm_up);
-            }
-            Ok(json!(true))
-        }
-        "get_config_status" => {
-            let app = arg::<String>(&args, "app")?;
-            let status = match app_type(&app)? {
-                AppType::Claude => Ok(crate::config::get_claude_config_status()),
-                AppType::ClaudeDesktop => {
-                    let status = crate::claude_desktop_config::get_status(
-                        ctx.state.db.as_ref(),
-                        ctx.state.proxy_service.is_running().await,
-                    )
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
-                    Ok(crate::config::ConfigStatus {
-                        exists: status.configured,
-                        path: status.config_library_path.unwrap_or_default(),
-                    })
-                }
-                AppType::Codex => {
-                    let auth_path = crate::codex_config::get_codex_auth_path();
-                    let config_text =
-                        crate::codex_config::read_codex_config_text().unwrap_or_default();
-                    Ok(crate::config::ConfigStatus {
-                        exists: auth_path.exists() || !config_text.trim().is_empty(),
-                        path: crate::codex_config::get_codex_config_dir()
-                            .to_string_lossy()
-                            .to_string(),
-                    })
-                }
-                AppType::Gemini => Ok(crate::config::ConfigStatus {
-                    exists: crate::gemini_config::get_gemini_env_path().exists(),
-                    path: crate::gemini_config::get_gemini_dir()
-                        .to_string_lossy()
-                        .to_string(),
-                }),
-                AppType::GrokBuild => Ok(crate::config::ConfigStatus {
-                    exists: crate::grok_config::get_grok_config_path().exists(),
-                    path: crate::grok_config::get_grok_config_dir()
-                        .to_string_lossy()
-                        .to_string(),
-                }),
-                AppType::OpenCode => {
-                    let config_path = crate::opencode_config::get_opencode_config_path()
-                        .map_err(|e| RpcError::Internal(e.to_string()))?;
-                    Ok(crate::config::ConfigStatus {
-                        exists: config_path
-                            .try_exists()
-                            .map_err(|e| RpcError::Internal(e.to_string()))?,
-                        path: crate::opencode_config::get_opencode_dir()
-                            .to_string_lossy()
-                            .to_string(),
-                    })
-                }
-                AppType::OpenClaw => Ok(crate::config::ConfigStatus {
-                    exists: crate::openclaw_config::get_openclaw_config_path().exists(),
-                    path: crate::openclaw_config::get_openclaw_dir()
-                        .to_string_lossy()
-                        .to_string(),
-                }),
-                AppType::Hermes => Ok(crate::config::ConfigStatus {
-                    exists: crate::hermes_config::get_hermes_config_path().exists(),
-                    path: crate::hermes_config::get_hermes_dir()
-                        .to_string_lossy()
-                        .to_string(),
-                }),
-                AppType::Dsh => {
-                    let file = crate::dsh_config::config_path();
-                    Ok(crate::config::ConfigStatus {
-                        exists: file.exists(),
-                        path: file.to_string_lossy().to_string(),
-                    })
-                }
-                other => Err(RpcError::BadRequest(format!(
-                    "{:?} 暂不支持查询配置状态",
-                    other
-                ))),
-            }?;
-            Ok(serde_json::to_value(status)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "fetch_models_dev" => {
-            let raw = crate::services::model_pricing::fetch_models_dev()
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(json!(raw))
-        }
-        "fetch_exchange_rates" => {
-            let rates = crate::services::exchange_rates::fetch_usd_rates()
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(rates)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "copilot_cli_signed_in_account" => {
-            let (login, github_domain) = match crate::commands::copilot_cli_login() {
-                Some(pair) => pair,
-                None => return Ok(json!(null)),
-            };
-            let accounts = ctx.copilot.read().await.list_accounts().await;
-            Ok(serde_json::to_value(crate::commands::match_signed_in_account(
-                login,
-                github_domain,
-                &accounts,
-            ))
-            .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "refresh_local_skill_metadata" => {
-            let db = ctx.state.db.clone();
-            let count = tokio::task::spawn_blocking(move || {
-                SkillService::refresh_local_skill_metadata(&db)
-            })
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(json!(count))
-        }
-        "cancel_mcp_connectivity_checks" => {
-            let batch_id = arg::<String>(&args, "batchId")?;
-            crate::services::mcp_connectivity::cancel_checks(&batch_id);
-            Ok(json!(null))
-        }
-        "sync_session_index" => {
-            let events = ctx.events.clone();
-            let status = tokio::task::spawn_blocking(move || {
-                crate::session_manager::search::start_sync(move |status| {
-                    events.publish("session-index-status", status);
-                })
-            })
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(status)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "search_session_content" => {
-            let query = arg::<String>(&args, "query")?;
-            let provider_ids = optional_arg::<Vec<String>>(&args, "providerIds")?;
-            let result = tokio::task::spawn_blocking(move || {
-                crate::session_manager::search::search(
-                    &query,
-                    provider_ids,
-                    crate::session_manager::search::DEFAULT_LIMIT,
-                )
-            })
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(result)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "clear_session_index" => {
-            tokio::task::spawn_blocking(crate::session_manager::search::clear)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(json!(true))
-        }
-        "workbuddy_model_owners" => {
-            let owners = tokio::task::spawn_blocking(crate::workbuddy_config::model_owners)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(owners)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "workbuddy_account_live_state" => {
-            let manager = Arc::clone(&ctx.workbuddy);
-            let state = tokio::task::spawn_blocking(move || manager.live_state())
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(state)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "workbuddy_account_import_current" => {
-            let manager = Arc::clone(&ctx.workbuddy);
-            let result = tokio::task::spawn_blocking(move || {
-                let outcome = manager.import_current()?;
-                let current = manager.status()?.current_account_id;
-                Ok::<_, crate::error::AppError>(crate::commands::WorkBuddyImportResult {
-                    account: crate::commands::map_workbuddy_account(
-                        outcome.account,
-                        current.as_deref(),
-                    ),
-                    created: outcome.created,
-                })
-            })
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(result)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "workbuddy_account_prepare_new_login" => {
-            let reauth_account_id = optional_arg::<String>(&args, "reauthAccountId")?;
-            let manager = Arc::clone(&ctx.workbuddy);
-            let captured = tokio::task::spawn_blocking(move || match reauth_account_id.as_deref()
-            {
-                Some(account_id) => manager.prepare_reauth(account_id),
-                None => manager.prepare_new_login(),
-            })
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(
-                captured.map(|account| crate::commands::map_workbuddy_account(account, None)),
-            )
-            .map_err(|e| RpcError::Internal(e.to_string()))?)
-        }
-        "workbuddy_account_open_app" => {
-            // Web 服务跑在服务器上，打开桌面端通常无意义，但保留与桌面一致的行为
-            tokio::task::spawn_blocking(crate::commands::open_workbuddy)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(json!(null))
-        }
-        "workbuddy_account_quota" => {
-            let account_id = arg::<String>(&args, "accountId")?;
-            let force = optional_arg::<bool>(&args, "force")?.unwrap_or(false);
-            let quota = crate::services::workbuddy_account::account_quota(
-                Arc::clone(&ctx.workbuddy),
-                account_id,
-                force,
-            )
-            .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(quota)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "get_log_config" => Ok(serde_json::to_value(
             ctx.state
@@ -2119,8 +2460,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     }
                     let start = ctx
                         .claude_accounts
-                        // Web 端不能弹浏览器：让用户自己打开授权页
-                        .start_login(false)
+                        .start_login(true)
                         .await
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
                     return Ok(json!({
@@ -2132,11 +2472,6 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         "interval": 1,
                         "browserOpened": start.browser_opened,
                     }));
-                }
-                AUTH_WORKBUDDY => {
-                    return Err(RpcError::BadRequest(
-                        "WorkBuddy 账号请从桌面端当前登录收录".into(),
-                    ));
                 }
                 _ => unreachable!(),
             };
@@ -2269,7 +2604,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                             &ctx.claude_accounts,
                         )
                         .await
-                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                        .map_err(RpcError::Internal)?;
                     }
                     match account {
                         Some(account) => Ok(serde_json::to_value(
@@ -2278,11 +2613,6 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         .map_err(|e| RpcError::Internal(e.to_string()))?),
                         None => Ok(json!(null)),
                     }
-                }
-                AUTH_WORKBUDDY => {
-                    return Err(RpcError::BadRequest(
-                        "WorkBuddy 账号请从桌面端当前登录收录".into(),
-                    ));
                 }
                 _ => unreachable!(),
             }
@@ -2360,15 +2690,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         &ctx.claude_accounts,
                     )
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
-                }
-                // 只删 CC Switch 里的副本，不替 WorkBuddy 登出
-                AUTH_WORKBUDDY => {
-                    let manager = Arc::clone(&ctx.workbuddy);
-                    tokio::task::spawn_blocking(move || manager.remove(&account_id))
-                        .await
-                        .map_err(|e| RpcError::Internal(e.to_string()))?
-                        .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    .map_err(RpcError::Internal)?;
                 }
                 _ => unreachable!(),
             }
@@ -2412,14 +2734,6 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     return Err(RpcError::BadRequest(
                         "Claude 账号通过绑定它的官方供应商卡使用".into(),
                     ));
-                }
-                // 还原这个账号的那组凭据文件（要求 WorkBuddy 已退出）
-                AUTH_WORKBUDDY => {
-                    let manager = Arc::clone(&ctx.workbuddy);
-                    tokio::task::spawn_blocking(move || manager.switch_to(&account_id))
-                        .await
-                        .map_err(|e| RpcError::Internal(e.to_string()))?
-                        .map_err(|e| RpcError::Internal(e.to_string()))?;
                 }
                 _ => unreachable!(),
             }
@@ -2485,10 +2799,8 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                         &ctx.claude_accounts,
                     )
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?;
+                    .map_err(RpcError::Internal)?;
                 }
-                // WorkBuddy 账号没有服务端登出：删除走 auth_remove_account
-                AUTH_WORKBUDDY => {}
                 _ => unreachable!(),
             }
             Ok(json!(null))
@@ -2562,7 +2874,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "copilot_is_authenticated" => Ok(json!(
-            ctx.copilot.read().await.is_authenticated().await
+            ctx.copilot.read().await.get_status().await.authenticated
         )),
         "copilot_logout" => {
             ctx.copilot
@@ -2643,7 +2955,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "list_daily_memory_files" => Ok(serde_json::to_value(
             crate::commands::list_daily_memory_files()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
+                .map_err(RpcError::Internal)?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
         "read_daily_memory_file" => {
@@ -2651,7 +2963,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(
                 crate::commands::read_daily_memory_file(filename)
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?
+                    .map_err(RpcError::Internal)?
             ))
         }
         "write_daily_memory_file" => {
@@ -2659,14 +2971,14 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let content = arg::<String>(&args, "content")?;
             crate::commands::write_daily_memory_file(filename, content)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "search_daily_memory_files" => {
             let query = arg::<String>(&args, "query")?;
             let results = crate::commands::search_daily_memory_files(query)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(results)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -2674,7 +2986,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let filename = arg::<String>(&args, "filename")?;
             crate::commands::delete_daily_memory_file(filename)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "read_workspace_file" => {
@@ -2682,7 +2994,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(
                 crate::commands::read_workspace_file(filename)
                     .await
-                    .map_err(|e| RpcError::Internal(e.to_string()))?
+                    .map_err(RpcError::Internal)?
             ))
         }
         "write_workspace_file" => {
@@ -2690,20 +3002,20 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let content = arg::<String>(&args, "content")?;
             crate::commands::write_workspace_file(filename, content)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(json!(null))
         }
         "parse_deeplink" => {
             let url = arg::<String>(&args, "url")?;
-            let request = crate::commands::parse_deeplink(url)
-                .map_err(RpcError::BadRequest)?;
+            let request = crate::deeplink::parse_deeplink_url(&url)
+                .map_err(|e| RpcError::BadRequest(e.to_string()))?;
             Ok(serde_json::to_value(request)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "merge_deeplink_config" => {
             let request = arg::<crate::deeplink::DeepLinkImportRequest>(&args, "request")?;
             let merged = crate::commands::merge_deeplink_config(request)
-                .map_err(RpcError::BadRequest)?;
+                .map_err(|e| RpcError::BadRequest(e.to_string()))?;
             Ok(serde_json::to_value(merged)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -2842,7 +3154,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 team_project_id.as_deref(),
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(quota)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -2850,7 +3162,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let tool = arg::<String>(&args, "tool")?;
             let quota = crate::services::subscription::get_subscription_quota(&tool)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             if let Ok(app_type) = AppType::from_str(&tool) {
                 let app_str = app_type.as_str().to_string();
                 ctx.state
@@ -2907,7 +3219,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 "Codex OAuth access token expired or rejected. Please re-login via cc-switch.",
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             ctx.events.publish(
                 "usage-cache-updated",
                 json!({ "kind": "codex_oauth", "accountId": id, "data": quota }),
@@ -2942,7 +3254,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 &chatgpt_account_id,
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(models)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -2984,7 +3296,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 "Please re-login via cc-switch.",
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(quota)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -3046,7 +3358,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
         "get_opencode_models" => Ok(serde_json::to_value(
             crate::commands::get_opencode_models()
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?,
+                .map_err(RpcError::Internal)?,
         )
         .map_err(|e| RpcError::Internal(e.to_string()))?),
         "fetch_models_for_config" => {
@@ -3070,7 +3382,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 request_headers,
             )
             .await
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+            .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(models)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -3078,7 +3390,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let url = arg::<String>(&args, "url")?;
             let result = crate::commands::test_proxy_url(url)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(result)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -3128,15 +3440,10 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             Ok(json!(null))
         }
         "update_endpoint_last_used" => {
-            let app = arg::<String>(&args, "app")?;
-            let provider_id = arg::<String>(&args, "providerId")?;
-            let url = arg::<String>(&args, "url")?;
-            crate::services::ProviderService::update_endpoint_last_used(
-                &ctx.state,
-                app_type(&app)?,
-                &provider_id,
-                url,
-            )?;
+            // web-fork: 上游 v4.0.40 移除了 update_endpoint_last_used（端点不再记录最近使用）。
+            let _ = arg::<String>(&args, "app")?;
+            let _ = arg::<String>(&args, "providerId")?;
+            let _ = arg::<String>(&args, "url")?;
             Ok(json!(null))
         }
         "test_api_endpoints" => {
@@ -3183,7 +3490,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let provider = ctx
                 .state
                 .db
-                .get_current_omo_provider("opencode", "omo")
+                .get_current_omo_provider(&AppType::OpenCode, "omo")
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(provider.map(|p| p.id).unwrap_or_default()))
         }
@@ -3191,7 +3498,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let provider = ctx
                 .state
                 .db
-                .get_current_omo_provider("opencode", "omo-slim")
+                .get_current_omo_provider(&AppType::OpenCode, "omo-slim")
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             Ok(json!(provider.map(|p| p.id).unwrap_or_default()))
         }
@@ -3204,13 +3511,13 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let providers = ctx
                 .state
                 .db
-                .get_all_providers("opencode")
+                .get_all_providers(&AppType::OpenCode)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             for (id, provider) in &providers {
                 if provider.category.as_deref() == Some(category) {
                     ctx.state
                         .db
-                        .clear_omo_provider_current("opencode", id, category)
+                        .clear_omo_provider_current(&AppType::OpenCode, id, category)
                         .map_err(|e| RpcError::Internal(e.to_string()))?;
                 }
             }
@@ -3441,7 +3748,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             >(&args, "wslShellByTool")?;
             let versions = crate::commands::get_tool_versions(tools, wsl)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(versions)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -3452,33 +3759,37 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             >(&args, "wslShellByTool")?;
             let candidates = crate::commands::prepare_tool_uninstall(tool, wsl)
                 .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
+                .map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(candidates)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "run_tool_lifecycle_action" => {
-            let tools = arg::<Vec<String>>(&args, "tools")?;
-            let action = arg::<String>(&args, "action")?;
-            let wsl = optional_arg::<
-                std::collections::HashMap<String, crate::commands::WslShellPreferenceInput>,
-            >(&args, "wslShellByTool")?;
-            let plan = optional_arg::<crate::commands::ToolUninstallPlan>(
-                &args,
-                "uninstallPlan",
-            )?;
-            run_tool_lifecycle_action_web(ctx, tools, action, wsl, plan).await?;
-            Ok(json!(null))
+            // web-fork: 上游命令需要 AppHandle 推送安装进度事件，相关内部实现
+            // (ToolLifecycleCoordinator / 工具安装脚本) 不对 web 模块开放。
+            // Web 端不支持静默安装/升级 CLI 工具，返回降级错误让前端提示。
+            let _tools = arg::<Vec<String>>(&args, "tools")?;
+            let _action = arg::<String>(&args, "action")?;
+            let _ = optional_arg::<Value>(&args, "wslShellByTool")?;
+            let _ = optional_arg::<Value>(&args, "uninstallPlan")?;
+            Err(RpcError::Unsupported(
+                "run_tool_lifecycle_action".to_string(),
+            ))
         }
         "probe_tool_installations" | "list_tool_installations" => {
             let tools = arg::<Vec<String>>(&args, "tools")?;
-            let reports = if command == "probe_tool_installations" {
-                crate::commands::probe_tool_installations(tools).await
+            if command == "probe_tool_installations" {
+                let reports = crate::commands::probe_tool_installations(tools)
+                    .await
+                    .map_err(RpcError::Internal)?;
+                Ok(serde_json::to_value(reports)
+                    .map_err(|e| RpcError::Internal(e.to_string()))?)
             } else {
-                crate::commands::list_tool_installations(tools).await
+                let reports = crate::commands::list_tool_installations(tools)
+                    .await
+                    .map_err(RpcError::Internal)?;
+                Ok(serde_json::to_value(reports)
+                    .map_err(|e| RpcError::Internal(e.to_string()))?)
             }
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
-            Ok(serde_json::to_value(reports)
-                .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
         "webdav_test_connection" => {
             let mut settings =
@@ -3690,7 +4001,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let providers = ctx
                 .state
                 .db
-                .get_all_providers(app_ty.as_str())
+                .get_all_providers(&app_ty)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             let provider = providers.get(&provider_id).ok_or_else(|| {
                 RpcError::BadRequest(format!("供应商 {provider_id} 不存在"))
@@ -3738,12 +4049,12 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let claude_providers = ctx
                 .state
                 .db
-                .get_all_providers(AppType::Claude.as_str())
+                .get_all_providers(&AppType::Claude)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             let existing_ids = ctx
                 .state
                 .db
-                .get_provider_ids(AppType::ClaudeDesktop.as_str())
+                .get_provider_ids(&AppType::ClaudeDesktop)
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
             let mut imported = 0usize;
             for provider in claude_providers.values() {
@@ -3768,7 +4079,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                 }
                 ctx.state
                     .db
-                    .save_provider(AppType::ClaudeDesktop.as_str(), &desktop_provider)
+                    .save_provider(&AppType::ClaudeDesktop, &desktop_provider)
                     .map_err(|e| RpcError::Internal(e.to_string()))?;
                 imported += 1;
             }
@@ -3830,7 +4141,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     .usage_cache
                     .put_claude_account(account_id, value.quota.clone());
             }
-            let quota = quota.map_err(|e| RpcError::Internal(e.to_string()))?;
+            let quota = quota.map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(quota)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -3900,7 +4211,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
             let id = account_id.clone();
             ctx.kimi
                 .remove(&account_id, move || {
-                    db.delete_provider("kimi", &id)?;
+                    db.delete_provider(&crate::app_config::AppType::Kimi, &id)?;
                     Ok(())
                 })
                 .await?;
@@ -3964,7 +4275,7 @@ pub async fn dispatch(ctx: &WebCtx, command: &str, args: Value) -> Result<Value,
                     }),
                 );
             }
-            let result = result.map_err(|e| RpcError::Internal(e.to_string()))?;
+            let result = result.map_err(RpcError::Internal)?;
             Ok(serde_json::to_value(result)
                 .map_err(|e| RpcError::Internal(e.to_string()))?)
         }
@@ -4014,109 +4325,15 @@ fn persist_s3_error(settings: &mut crate::settings::S3SyncSettings, error: &AppE
     let _ = crate::settings::update_s3_sync_status(settings.status.clone());
 }
 
-/// Web 版工具安装/升级：逻辑与桌面 `run_tool_lifecycle_action` 一致，进度经 SSE
-/// 事件总线（`tool-lifecycle-progress`）推送，而不是 Tauri 事件。
-async fn run_tool_lifecycle_action_web(
-    ctx: &WebCtx,
-    tools: Vec<String>,
-    action: String,
-    wsl_shell_by_tool: Option<
-        std::collections::HashMap<String, crate::commands::WslShellPreferenceInput>,
-    >,
-    uninstall_plan: Option<crate::commands::ToolUninstallPlan>,
-) -> Result<(), RpcError> {
-    use crate::commands::misc::{
-        build_tool_lifecycle_command, normalize_requested_tools, run_tool_lifecycle_silently,
-        ToolLifecycleAction, TOOL_LIFECYCLE,
-    };
-    use crate::commands::misc::tool_lifecycle_progress::{
-        ToolLifecycleProgress, ToolLifecycleStage,
-    };
-
-    let requested = normalize_requested_tools(&tools);
-    if requested.is_empty() {
-        return Err(RpcError::BadRequest("No supported tools selected".into()));
-    }
-
-    let events = ctx.events.clone();
-    let sink = Arc::new(move |payload: crate::commands::misc::tool_lifecycle_progress::ToolLifecycleProgressPayload| {
-        if payload.stage == ToolLifecycleStage::Output {
-            events.publish("tool-lifecycle-progress", payload);
-        }
-    });
-
-    if action == "uninstall" {
-        let plan = uninstall_plan
-            .ok_or_else(|| RpcError::BadRequest("需要先预览卸载计划再确认".into()))?;
-        if requested.len() != 1 || requested[0] != plan.tool() {
-            return Err(RpcError::BadRequest(
-                "卸载计划与所选工具不一致".into(),
-            ));
-        }
-        let progress = ToolLifecycleProgress::with_sink(&requested, sink);
-        let queued = progress.clone();
-        return TOOL_LIFECYCLE
-            .run_with_queue_notice(
-                requested,
-                move || queued.queued(),
-                move |tools| {
-                    progress.running();
-                    for tool in tools {
-                        let pref = wsl_shell_by_tool
-                            .as_ref()
-                            .and_then(|prefs| prefs.get(*tool));
-                        crate::commands::misc::tool_uninstall::uninstall(
-                            tool,
-                            pref,
-                            &plan,
-                            &progress,
-                        )?;
-                    }
-                    Ok(())
-                },
-            )
-            .await
-            .map_err(RpcError::Internal);
-    }
-
-    let action = action
-        .parse::<ToolLifecycleAction>()
-        .map_err(|e| RpcError::Internal(e.to_string()))?;
-    if matches!(action, ToolLifecycleAction::Update) {
-        for tool in &requested {
-            crate::commands::misc::tool_node_requirement::ensure_update_node(tool)
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-        }
-    }
-
-    let progress = ToolLifecycleProgress::with_sink(&requested, sink);
-    let queued = progress.clone();
-    TOOL_LIFECYCLE
-        .run_with_queue_notice(
-            requested,
-            move || queued.queued(),
-            move |tools| {
-                progress.running();
-                let command_line =
-                    build_tool_lifecycle_command(tools, action, wsl_shell_by_tool.as_ref())?;
-                run_tool_lifecycle_silently(&command_line, "tool_lifecycle", &progress)
-            },
-        )
-        .await
-        .map_err(RpcError::Internal)
-}
-
 const AUTH_COPILOT: &str = "github_copilot";
 const AUTH_CODEX: &str = "codex_oauth";
 const AUTH_XAI: &str = "xai_oauth";
 const AUTH_AGY: &str = "agy_oauth";
 const AUTH_CLAUDE: &str = "claude_official";
-const AUTH_WORKBUDDY: &str = "workbuddy_account";
 
 fn ensure_auth_provider(provider: &str) -> Result<(), RpcError> {
     match provider {
-        AUTH_COPILOT | AUTH_CODEX | AUTH_XAI | AUTH_AGY | AUTH_CLAUDE | AUTH_WORKBUDDY => Ok(()),
+        AUTH_COPILOT | AUTH_CODEX | AUTH_XAI | AUTH_AGY | AUTH_CLAUDE => Ok(()),
         other => Err(RpcError::BadRequest(format!(
             "不支持的认证提供方: {other}"
         ))),
@@ -4215,25 +4432,6 @@ async fn auth_snapshot(
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((!accounts.is_empty(), None, None, accounts))
         }
-        AUTH_WORKBUDDY => {
-            let manager = Arc::clone(&ctx.workbuddy);
-            let status = tokio::task::spawn_blocking(move || manager.status())
-                .await
-                .map_err(|e| RpcError::Internal(e.to_string()))?
-                .map_err(|e| RpcError::Internal(e.to_string()))?;
-            let current = status.current_account_id.clone();
-            let accounts = status
-                .accounts
-                .into_iter()
-                .map(|account| {
-                    account_value(crate::commands::map_workbuddy_account(
-                        account,
-                        current.as_deref(),
-                    ))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok((!accounts.is_empty(), current, None, accounts))
-        }
         _ => Err(RpcError::BadRequest("不支持的认证提供方".into())),
     }
 }
@@ -4282,7 +4480,7 @@ async fn import_deeplink_unified(
 fn publish_profile_events(ctx: &WebCtx, profile_id: &str, scope: ProfileScope) {
     for app_type in scope.apps() {
         let app_str = app_type.as_str();
-        let (_, auto_failover_enabled) = ctx.state.db.get_proxy_flags_sync(app_str);
+        let (_, auto_failover_enabled) = ctx.state.db.get_proxy_flags_sync(app_type);
         let proxy_enabled = crate::mode::current::is_proxy(app_type);
         let provider_id = crate::mode::current::provider_for(
             &ctx.state.db,

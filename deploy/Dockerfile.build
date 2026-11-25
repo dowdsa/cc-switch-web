@@ -1,0 +1,82 @@
+# CC Switch Web arm64 交叉构建镜像（amd64 宿主 → arm64 产物）
+#
+# 设计说明:
+#   - amd64 产物在宿主直接 cargo build（宿主 Ubuntu 22.04 已有全部 dev 依赖），
+#     不进容器；容器只负责 arm64 交叉编译。
+#   - jammy 的 libwebkit2gtk-4.1-dev amd64/arm64 变体互相 Breaks（头文件共享
+#     /usr/include/webkitgtk-4.1），一个容器装不下两套 → 容器里只装 :arm64 的
+#     dev 库与交叉工具链。头文件是架构无关的 C 头，arm64 包里的即可用。
+#   - 产物动态链接 jammy 的库 → GLIBC 2.35 基线，运行时需
+#     libwebkit2gtk-4.1-0 / libgtk-3-0 等（Ubuntu 22.04+/Debian 12+/RHEL 9+）。
+#
+# 镜像源（国内加速，构建时可用 --build-arg 覆盖回官方）:
+#   APT_MIRROR     Ubuntu archive+ports 镜像（默认清华 TUNA）
+#   RUSTUP_DIST    rustup dist 镜像（默认 USTC；官方 rustup 的 UA 可直接用）
+#   crates.io 保持官方（实测可达，换源有一致性风险）
+#
+# 用法（由 scripts/package-release.sh 调用）:
+#   docker build -t ccsw-build -f deploy/Dockerfile.build deploy/
+#   docker run --rm -v <repo>/src-tauri:/src/src-tauri -v <out>:/out \
+#     -e TARGETS=aarch64-unknown-linux-gnu ccsw-build
+
+FROM ubuntu:22.04
+
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+ARG RUSTUP_DIST=https://mirrors.ustc.edu.cn/rust-static
+ARG RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:/usr/local/bin:$PATH \
+    RUSTUP_DIST_SERVER=${RUSTUP_DIST} \
+    RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT}
+
+# 基础包先用官方 HTTP 源装齐（base 镜像无 ca-certificates，HTTPS 源尚不可用）
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+# 切国内镜像，分两步 sed（BRE 捕获组与 | 交替不可靠）:
+#   1) 换 URL（archive 与 security 都指到镜像的 ubuntu/ 目录）
+#   2) 给 deb 行加 [arch=amd64] 限定（镜像的 ubuntu/ 目录没有 binary-arm64 索引，
+#      不加会让 apt 去 ubuntu/ 下找 arm64 包 → 404；deb-src 行不动）
+#   3) arm64 走 ubuntu-ports 镜像（arm64 官方只在 ports）
+RUN sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}/ubuntu|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}/ubuntu|g" /etc/apt/sources.list \
+ && sed -i "s|^deb |deb [arch=amd64] |g" /etc/apt/sources.list \
+ && echo "deb [arch=arm64] ${APT_MIRROR}/ubuntu-ports jammy main universe" >> /etc/apt/sources.list \
+ && echo "deb [arch=arm64] ${APT_MIRROR}/ubuntu-ports jammy-updates main universe" >> /etc/apt/sources.list \
+ && echo "deb [arch=arm64] ${APT_MIRROR}/ubuntu-ports jammy-security main universe" >> /etc/apt/sources.list \
+ && dpkg --add-architecture arm64
+
+# 构建依赖:
+#   - 通用: build-essential pkg-config python3 git
+#   - libclang: rquickjs-sys 的 bindgen 声明在 lockfile（Windows-aarch64 target 传播），
+#     按 Linux target 解析不启用，装上以防 vendoring/解析变化
+#   - arm64 交叉: g++ 交叉工具链 + :arm64 版 GTK/WebKit/ssl 头文件与库
+#     （.pc 在 /usr/lib/aarch64-linux-gnu/pkgconfig，头文件在共享 /usr/include）
+#   - libssl-dev:arm64: reqwest 默认 features 引入 native-tls（OpenSSL），
+#     宿主 amd64 有 libssl-dev 所以原生构建能过；交叉容器必须补 arm64 版
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends \
+      build-essential pkg-config python3 git \
+      libclang-dev clang \
+      g++-aarch64-linux-gnu libc6-dev-arm64-cross \
+      libssl-dev:arm64 \
+      libwebkit2gtk-4.1-dev:arm64 libgtk-3-dev:arm64 librsvg2-dev:arm64 \
+      libayatana-appindicator3-dev:arm64 \
+ && rm -rf /var/lib/apt/lists/*
+
+# Rust stable + arm64 目标 std（走 RUSTUP_DIST 镜像）
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+ | CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup \
+   RUSTUP_DIST_SERVER="$RUSTUP_DIST" RUSTUP_UPDATE_ROOT="$RUSTUP_UPDATE_ROOT" \
+   RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --default-toolchain stable --profile minimal \
+ && rustup target add aarch64-unknown-linux-gnu
+
+COPY cross-env.sh /usr/local/bin/cross-env.sh
+COPY build.sh /build.sh
+RUN chmod +x /build.sh /usr/local/bin/cross-env.sh
+
+WORKDIR /src
+ENTRYPOINT ["/build.sh"]

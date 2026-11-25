@@ -51,9 +51,7 @@ pub(crate) fn sync_and_commit<T>(
     spec: Option<&Value>,
     commit: impl FnOnce() -> Result<T, AppError>,
 ) -> Result<T, AppError> {
-    let _guard = WRITE_LOCK
-        .lock()
-        .map_err(|e| AppError::Message(e.to_string()))?;
+    let _guard = crate::sync_utils::lock_file_operation(&WRITE_LOCK);
     let path = config_path();
     crate::mcode_config::write_and_commit(&path, || sync_file(&path, id, spec), commit)
 }
@@ -109,7 +107,10 @@ fn sync_file(path: &Path, id: &str, spec: Option<&Value>) -> Result<(), AppError
 
 pub fn import(state: &AppState) -> Result<usize, AppError> {
     let document = read(&config_path())?;
-    let mut existing = state.db.get_all_mcp_servers()?;
+    let (mut existing, unreadable) = state
+        .db
+        .get_mcp_server_rows()?
+        .into_readable_and_unreadable_ids();
     let mut count = 0;
     let mut skipped = Vec::new();
     for (id, native) in document
@@ -118,6 +119,10 @@ pub fn import(state: &AppState) -> Result<usize, AppError> {
         .into_iter()
         .flatten()
     {
+        if unreadable.contains(id) {
+            skipped.push(format!("'{id}': stored server is unreadable"));
+            continue;
+        }
         if is_connector(native) {
             continue;
         }

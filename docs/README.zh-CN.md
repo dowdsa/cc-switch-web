@@ -36,7 +36,7 @@
 - 我的服务器**没有公网带宽**，也不打算把管理界面暴露到公网
 - 因此把 CC Switch 的供应商与配置管理能力做成了 Web 界面：通过本机、内网或 SSH 隧道访问，配置和数据都留在服务器上
 
-本项目 fork 自 **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)**（基线 v4.0.31），不是官方 Web 版，与上游维护者没有隶属关系。
+本项目 fork 自 **[farion1231/cc-switch](https://github.com/farion1231/cc-switch)**（基线 v4.0.23），不是官方 Web 版，与上游维护者没有隶属关系。
 
 ## ✨ 为什么选择 Web 版
 
@@ -182,7 +182,7 @@ Web 端拥有管理服务器 CLI 配置的能力，部分操作等价于服务�
 
 - 上游项目：**CC Switch**
 - 上游仓库：**https://github.com/farion1231/cc-switch**
-- 基线版本：v4.0.31
+- 基线版本：v4.0.23
 - 上游作者：Jason Young
 
 本项目为社区二开，不是官方 Web 版，与上游维护者没有隶属关系。代码与数据库结构沿用上游，Web 界面、登录认证、部署脚本等为本仓库新增。

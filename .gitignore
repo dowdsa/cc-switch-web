@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-web/
+dist-release/
 release/
 .DS_Store
 *.log
@@ -30,8 +31,3 @@ copilot-api
 .history
 CODEBUDDY.md
 mainWindow.js
-
-# Release build outputs
-artifacts/
-dist-release/
-.pnpm-store/

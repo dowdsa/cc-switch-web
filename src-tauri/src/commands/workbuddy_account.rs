@@ -91,7 +91,7 @@ pub async fn workbuddy_account_open_app() -> Result<(), String> {
         .map_err(|error| error.to_string())?
 }
 
-pub(crate) fn open_workbuddy() -> Result<(), String> {
+fn open_workbuddy() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let opened = |args: &[&str]| {
