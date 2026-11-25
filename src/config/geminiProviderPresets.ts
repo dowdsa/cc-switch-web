@@ -159,6 +159,27 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
     icon: "haoai",
   },
   {
+    name: "StringAI",
+    websiteUrl: "https://www.string.ink",
+    apiKeyUrl: "https://www.string.ink/register?ref=661AE533A60AF110",
+    // 原生 /v1beta 回 Google 格式的 401（2026-11-23）；可用的 Gemini 型号随
+    // Key 所属分组而定，未用真 Key 验证
+    settingsConfig: {
+      env: {
+        GOOGLE_GEMINI_BASE_URL: "https://www.string.ink",
+        GEMINI_API_KEY: "",
+        GEMINI_MODEL: "gemini-3.8-flash",
+      },
+    },
+    baseURL: "https://www.string.ink",
+    model: "gemini-3.8-flash",
+    description: "StringAI",
+    category: "aggregator",
+    isPartner: true,
+    partnerPromotionKey: "stringai",
+    icon: "stringai",
+  },
+  {
     name: "FennoAI",
     websiteUrl: "https://api.fenno.ai",
     apiKeyUrl:
@@ -239,27 +260,6 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
     partnerPromotionKey: "grooroute",
     endpointCandidates: ["https://grooroute.pro", "https://grooroute.xyz"],
     icon: "grooroute",
-  },
-  {
-    name: "DIT.ai",
-    websiteUrl: "https://dit.ai",
-    apiKeyUrl: "https://dit.ai?utm_source=ccswitch",
-    // Gemini 原生 /v1beta 在站点根；网关也认 x-goog-api-key（2026-10-21 用假 Key
-    // 探测为 invalid_api_key 而非 missing_api_key）
-    settingsConfig: {
-      env: {
-        GOOGLE_GEMINI_BASE_URL: "https://api.dit.ai",
-        GEMINI_API_KEY: "",
-        GEMINI_MODEL: "gemini-3.8-flash",
-      },
-    },
-    baseURL: "https://api.dit.ai",
-    model: "gemini-3.8-flash",
-    description: "DIT.ai",
-    category: "aggregator",
-    isPartner: true,
-    partnerPromotionKey: "dit",
-    icon: "dit",
   },
   {
     name: "BuyToken",
@@ -482,8 +482,8 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
   },
   {
     name: "9527CODE",
-    websiteUrl: "https://9527.codes",
-    apiKeyUrl: "https://9527.codes/register?aff=e5zI",
+    websiteUrl: "https://9527.codes/register?channel=ccs",
+    apiKeyUrl: "https://9527.codes/register?channel=ccs",
     settingsConfig: {
       env: {
         GOOGLE_GEMINI_BASE_URL: "https://9527.codes",
@@ -506,28 +506,25 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
   },
   {
     name: "TeamoRouter",
-    websiteUrl: "https://teamorouter.cn",
+    websiteUrl: "https://teamorouter.com",
     apiKeyUrl:
-      "https://teamorouter.cn/?utm_source=cc_switch&utm_medium=referral&utm_campaign=ai_directory",
-    // 接入文档 teamorouter.cn/zh/docs/install-gemini-cli（2026-10-31）：Key 以 Bearer 发送
+      "https://teamorouter.com/?utm_source=cc_switch&utm_medium=referral&utm_campaign=ai_directory",
+    // 接入文档 teamorouter.com/zh/docs/install-gemini-cli（2026-10-31）：Key 以 Bearer 发送
     settingsConfig: {
       env: {
-        GOOGLE_GEMINI_BASE_URL: "https://api.teamorouter.cn",
+        GOOGLE_GEMINI_BASE_URL: "https://api.teamorouter.com",
         GEMINI_API_KEY: "",
         GEMINI_API_KEY_AUTH_MECHANISM: "bearer",
         GEMINI_MODEL: "gemini-3.8-flash",
       },
     },
-    baseURL: "https://api.teamorouter.cn",
+    baseURL: "https://api.teamorouter.com",
     model: "gemini-3.8-flash",
     description: "TeamoRouter",
     category: "aggregator",
     isPartner: true,
     partnerPromotionKey: "teamorouter",
-    endpointCandidates: [
-      "https://api.teamorouter.cn",
-      "https://api.teamorouter.com",
-    ],
+    endpointCandidates: ["https://api.teamorouter.com"],
     icon: "teamorouter",
   },
   {
@@ -548,15 +545,15 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
   },
   {
     name: "A6API",
-    websiteUrl: "https://www.a6api.com",
-    apiKeyUrl: "https://a6api.com/register?aff=AqNr",
+    websiteUrl: "https://www.a6api.vip",
+    apiKeyUrl: "https://a6api.vip/register?aff=AqNr",
     settingsConfig: {
       env: {
-        GOOGLE_GEMINI_BASE_URL: "https://api.a6api.com",
+        GOOGLE_GEMINI_BASE_URL: "https://api.a6api.vip",
         GEMINI_MODEL: "gemini-3.8-flash",
       },
     },
-    baseURL: "https://api.a6api.com",
+    baseURL: "https://api.a6api.vip",
     model: "gemini-3.8-flash",
     description: "A6API",
     category: "aggregator",
@@ -606,7 +603,6 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
     description: "CCSub",
     category: "aggregator",
     isPartner: true,
-    partnerPromotionKey: "ccsub",
     icon: "ccsub",
   },
   {
@@ -1115,20 +1111,3 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
     icon: "aicoming",
   },
 ];
-
-export function getGeminiPresetByName(
-  name: string,
-): GeminiProviderPreset | undefined {
-  return geminiProviderPresets.find((preset) => preset.name === name);
-}
-
-export function getGeminiPresetByUrl(
-  url: string,
-): GeminiProviderPreset | undefined {
-  if (!url) return undefined;
-  return geminiProviderPresets.find(
-    (preset) =>
-      preset.baseURL &&
-      url.toLowerCase().includes(preset.baseURL.toLowerCase()),
-  );
-}

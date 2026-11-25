@@ -9,7 +9,7 @@
 use crate::database::Database;
 use crate::error::AppError;
 use crate::services::session_usage::SessionSyncResult;
-use crate::services::session_usage_pi::{sync_flavor, Flavor};
+use crate::services::session_usage_pi::Flavor;
 use crate::session_manager::providers::{omp, pi};
 use serde_json::Value;
 use std::fs::{self, File};
@@ -30,6 +30,9 @@ pub(crate) const OMP: Flavor = Flavor {
     label: "Oh My Pi",
     model_usage_carrier: true,
     title_slot: true,
+    // Oh My Pi's subagents (its `task` tool) keep their own session files;
+    // Pi's official `subagent` example extension contract is Pi-only.
+    subagent_tool_results: false,
     session_files,
 };
 
@@ -77,8 +80,11 @@ fn opens_with_title_slot(file: &Path) -> bool {
 
 /// Import usage from every Oh My Pi session file under the session browser's
 /// current root and layout rules, including nested subagent sessions.
-pub fn sync_omp_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
-    sync_flavor(db, &OMP)
+pub(crate) fn sync_omp_usage(
+    db: &Database,
+    cursors: &crate::services::session_usage::SyncCursors,
+) -> Result<SessionSyncResult, AppError> {
+    super::session_usage_pi::sync_flavor_with_cursors(db, &OMP, cursors)
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ import {
   KeyRound,
   Layers,
   LayoutGrid,
+  Puzzle,
   Route,
   Server,
   Settings,
@@ -276,7 +277,8 @@ function MainDirectory({
     alert?: string;
   }[] = [
     { page: "mcp", label: "MCP", icon: Server },
-    { page: "skills", label: "Skills", icon: SkillsIcon },
+    { page: "skills", label: t("nav.skills"), icon: SkillsIcon },
+    { page: "plugins", label: t("nav.plugins"), icon: Puzzle },
     { page: "prompts", label: t("nav.prompts"), icon: BookOpen },
     { page: "sessions", label: t("nav.sessions"), icon: History },
     {
@@ -484,7 +486,7 @@ function AppNavItem({
       onClick={onSelect}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "mx-2 flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
+        "mx-2 flex h-nav-row w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
         selected && "bg-selected font-medium hover:bg-selected",
       )}
     >
@@ -645,8 +647,9 @@ function NavItem({
         aria-label={trailingLabel ? accessibleName : undefined}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
-          compact ? "min-w-0 flex-1" : "mx-2",
+          "flex h-nav-row shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm transition-colors hover:bg-subtle",
+          // 底栏两项按各自文字分宽度：「Apps」这类短词不必占满一半，长词（Optionen、Настройки）才放得下
+          compact ? "min-w-0 flex-auto shrink" : "mx-2 w-[184px]",
           selected && "bg-selected font-medium hover:bg-selected",
         )}
       >
@@ -732,7 +735,7 @@ function SettingsDirectory({
         <button
           type="button"
           onClick={onExitSettings}
-          className="mx-2 flex h-9 shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm text-fg-2 transition-colors hover:bg-subtle hover:text-fg-1"
+          className="mx-2 flex h-nav-row w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-sm text-fg-2 transition-colors hover:bg-subtle hover:text-fg-1"
         >
           <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={1.5} aria-hidden="true" />
           {t("nav.back")}

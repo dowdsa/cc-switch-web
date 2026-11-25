@@ -10,7 +10,6 @@ import {
   type KimiProviderConfig,
 } from "@/config/kimiProviderPresets";
 import { kimiConfigToToml } from "@/components/providers/forms/helpers/kimiToml";
-import { MODELS_DEV_API_URL } from "@/lib/modelsDev";
 import type { ProviderCategory } from "@/types";
 import { createTestQueryClient } from "../utils/testQueryClient";
 import { server } from "../msw/server";
@@ -124,14 +123,17 @@ describe("KimiProviderForm", () => {
         source === "import" ? native : config,
       );
       if (source === "toml") {
-        fireEvent.change(screen.getByLabelText("providerForm.nativeConfig.title"), {
-          target: {
-            value: kimiConfigToToml(
-              native as KimiProviderConfig,
-              "managed:kimi-code",
-            ),
+        fireEvent.change(
+          screen.getByLabelText("providerForm.nativeConfig.title"),
+          {
+            target: {
+              value: kimiConfigToToml(
+                native as KimiProviderConfig,
+                "managed:kimi-code",
+              ),
+            },
           },
-        });
+        );
       }
       expandModels();
       expect(
@@ -409,7 +411,9 @@ describe("KimiProviderForm", () => {
   it("shows this provider's tables in config.toml layout", () => {
     setup();
     const text = (
-      screen.getByLabelText("providerForm.nativeConfig.title") as HTMLTextAreaElement
+      screen.getByLabelText(
+        "providerForm.nativeConfig.title",
+      ) as HTMLTextAreaElement
     ).value;
     expect(text).toContain('[providers."managed:kimi-code"]');
     expect(text).toContain('[models."kimi-code/k3"]');
@@ -484,19 +488,21 @@ describe("KimiProviderForm", () => {
           ]);
         },
       ),
-      http.get(MODELS_DEV_API_URL, () =>
-        HttpResponse.json({
-          example: {
-            api: "https://api.example.com/v1",
-            models: {
-              "model-x": {
-                limit: { context: 123456 },
-                reasoning: true,
-                modalities: { input: ["text", "image"], output: ["text"] },
+      http.post("http://tauri.local/fetch_models_dev", () =>
+        HttpResponse.json(
+          JSON.stringify({
+            example: {
+              api: "https://api.example.com/v1",
+              models: {
+                "model-x": {
+                  limit: { context: 123456 },
+                  reasoning: true,
+                  modalities: { input: ["text", "image"], output: ["text"] },
+                },
               },
             },
-          },
-        }),
+          }),
+        ),
       ),
     );
     const submit = vi.fn();
@@ -540,8 +546,11 @@ describe("KimiProviderForm", () => {
       expect(
         (
           parseToml(
-            (screen.getByLabelText("providerForm.nativeConfig.title") as HTMLTextAreaElement)
-              .value,
+            (
+              screen.getByLabelText(
+                "providerForm.nativeConfig.title",
+              ) as HTMLTextAreaElement
+            ).value,
           ) as { models: Record<string, { max_context_size: number }> }
         ).models["acme/model-x"].max_context_size,
       ).toBe(123456),
