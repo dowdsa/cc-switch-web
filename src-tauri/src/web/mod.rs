@@ -264,7 +264,7 @@ async fn run_server(options: WebOptions) -> Result<(), String> {
         _ => {}
     }
 
-    for app in crate::app_config::AppType::all().filter(|t| !t.is_additive_mode()) {
+    for app in crate::app_config::AppType::all().filter(|t| !t.spec().additive) {
         if !crate::services::provider::should_import_default_config_on_startup(&state, &app)
             .unwrap_or(false)
         {
