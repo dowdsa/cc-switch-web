@@ -26,6 +26,7 @@ for TARGET in $TARGETS; do
   # 未设时位于 "target/<triple>/release/"。两种布局都兼容。
   BIN=""
   for CAND in \
+    "$CARGO_TARGET_DIR/$TARGET/$PROFILE/cc-switch" \
     "${CARGO_TARGET_DIR:-target}/$TARGET/$PROFILE/cc-switch" \
     "target/$TARGET/$PROFILE/cc-switch"; do
     [ -x "$CAND" ] && { BIN="$CAND"; break; }
